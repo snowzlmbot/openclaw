@@ -1,0 +1,152 @@
+name: Issue 94713 Browser Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Branch, tag, or commit SHA to browser-test
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-94713-browser-proof-${{ github.event.inputs.target_ref }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PNPM_CONFIG_STORE_DIR: "/tmp/openclaw-pnpm-store"
+  PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: "false"
+
+jobs:
+  browser-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout target ref
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_REF: ${{ inputs.target_ref }}
+        run: |
+          set -euo pipefail
+          git init "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" config gc.auto 0
+          git -C "$GITHUB_WORKSPACE" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+          git -C "$GITHUB_WORKSPACE" fetch --no-tags --prune --no-recurse-submodules --depth=20 origin \
+            "+${CHECKOUT_REF}:refs/remotes/origin/target"
+          git -C "$GITHUB_WORKSPACE" checkout --detach refs/remotes/origin/target
+          git -C "$GITHUB_WORKSPACE" rev-parse HEAD
+      - name: Setup Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          install-bun: "false"
+      - name: Ensure Chromium
+        run: node scripts/ensure-playwright-chromium.mjs
+      - name: Run browser reproduction
+        env:
+          TARGET_REF: ${{ inputs.target_ref }}
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/issue-94713-browser-proof
+          cat > .artifacts/issue-94713-browser-proof/browser-proof.ts <<'TS'
+          import { createServer } from "node:http";
+          import { writeFileSync } from "node:fs";
+          import { once } from "node:events";
+          import { chromium } from "playwright";
+          import { createModelSelectionState } from "../../src/auto-reply/reply/model-selection.ts";
+          import { formatModelOverrideResetEvent } from "../../src/auto-reply/reply/get-reply-directives-apply.ts";
+
+          const targetRef = process.env.TARGET_REF ?? "unknown";
+          const sessionKey = "agent:main:dashboard:child";
+          const cfg = {
+            agents: {
+              defaults: {
+                model: { primary: "openai/gpt-5.4" },
+                models: {
+                  "openai/gpt-5.4": {},
+                  "openai/gpt-5.5": {},
+                },
+              },
+            },
+          };
+          const sessionEntry: Record<string, unknown> = {
+            providerOverride: "openai",
+            modelOverride: "openai/gpt-5.5",
+            modelOverrideSource: "auto",
+            modelProvider: "openai",
+            model: "gpt-5.5",
+            contextTokens: 350000,
+            authProfileOverride: "openai:default",
+            authProfileOverrideSource: "auto",
+          };
+          const sessionStore: Record<string, Record<string, unknown>> = { [sessionKey]: sessionEntry };
+          const state = await createModelSelectionState({
+            cfg: cfg as never,
+            agentCfg: cfg.agents.defaults as never,
+            sessionEntry: sessionEntry as never,
+            sessionStore: sessionStore as never,
+            sessionKey,
+            defaultProvider: "openai",
+            defaultModel: "gpt-5.4",
+            primaryProvider: "openai",
+            primaryModel: "gpt-5.4",
+            provider: "openai",
+            model: "gpt-5.4",
+            hasModelDirective: false,
+          });
+          const message = formatModelOverrideResetEvent({
+            rejectedRef: state.resetModelOverrideRef,
+            initialModelLabel: "openai/gpt-5.4",
+            reason: state.resetModelOverrideReason,
+          });
+          const payload = {
+            targetRef,
+            resetModelOverride: state.resetModelOverride,
+            resetModelOverrideRef: state.resetModelOverrideRef,
+            resetModelOverrideReason: state.resetModelOverrideReason ?? null,
+            message,
+            sessionStoreAfter: sessionStore[sessionKey],
+          };
+          writeFileSync(".artifacts/issue-94713-browser-proof/browser-proof.json", JSON.stringify(payload, null, 2));
+
+          const html = `<!doctype html><html><head><meta charset="utf-8"><title>Issue 94713 browser proof</title>
+          <style>body{font-family:system-ui,sans-serif;margin:32px;line-height:1.45}.card{border:1px solid #ddd;border-radius:12px;padding:20px;max-width:980px}.ok{color:#0a7f36}.bad{color:#b42318}code{background:#f6f8fa;padding:2px 4px;border-radius:4px}pre{white-space:pre-wrap;background:#f6f8fa;padding:12px;border-radius:8px}</style></head>
+          <body><main class="card"><h1>Issue #94713 browser reproduction</h1><p>Target ref: <code>${targetRef}</code></p><p>Allowed models include <code>openai/gpt-5.4</code> and <code>openai/gpt-5.5</code>.</p><p>Reset reason: <strong id="reason">${payload.resetModelOverrideReason}</strong></p><h2>User-visible system event</h2><pre id="message">${message}</pre><p id="verdict" class="${message.includes("Stored model override") && !message.includes("not allowed") ? "ok" : "bad"}">${message.includes("Stored model override") && !message.includes("not allowed") ? "Fixed stale-session copy shown" : "Misleading allowlist rejection shown"}</p></main></body></html>`;
+          const server = createServer((_, res) => {
+            res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+            res.end(html);
+          });
+          server.listen(0, "127.0.0.1");
+          await once(server, "listening");
+          const address = server.address();
+          if (!address || typeof address === "string") throw new Error("No local server port");
+          const browser = await chromium.launch({ headless: true });
+          try {
+            const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+            await page.goto(`http://127.0.0.1:${address.port}/`, { waitUntil: "domcontentloaded" });
+            const renderedMessage = await page.locator("#message").innerText();
+            const renderedReason = await page.locator("#reason").innerText();
+            await page.screenshot({ path: ".artifacts/issue-94713-browser-proof/browser-proof.png", fullPage: true });
+            console.log("BROWSER_RENDERED_REASON=" + renderedReason);
+            console.log("BROWSER_RENDERED_MESSAGE=" + renderedMessage);
+            if (!renderedMessage.includes("Stored model override openai/gpt-5.5 is stale for this session")) {
+              throw new Error("Browser rendered stale-session copy was not fixed");
+            }
+            if (renderedMessage.includes("not allowed") || renderedMessage.includes("Add openai/gpt-5.5")) {
+              throw new Error("Browser still rendered misleading allowlist rejection copy");
+            }
+          } finally {
+            await browser.close();
+            server.close();
+          }
+          TS
+          node --import tsx .artifacts/issue-94713-browser-proof/browser-proof.ts
+      - name: Upload browser proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-94713-browser-proof-${{ github.run_id }}
+          path: .artifacts/issue-94713-browser-proof
+          if-no-files-found: warn
