@@ -10,7 +10,7 @@ on:
       test_name:
         description: Vitest test name pattern
         required: false
-        default: provider-qualified
+        default: provider-qualified|stale session overrides
         type: string
 
 permissions:
@@ -47,5 +47,9 @@ jobs:
         uses: ./.github/actions/setup-node-env
         with:
           install-bun: "false"
-      - name: Run targeted model-selection regression
-        run: node scripts/run-vitest.mjs run src/auto-reply/reply/model-selection.test.ts -t "${{ inputs.test_name }}"
+      - name: Run targeted regression files
+        run: >-
+          node scripts/run-vitest.mjs run
+          src/auto-reply/reply/model-selection.test.ts
+          src/auto-reply/reply/get-reply-directives-apply.test.ts
+          -t "${{ inputs.test_name }}"
