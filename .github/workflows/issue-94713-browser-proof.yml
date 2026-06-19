@@ -122,7 +122,9 @@ jobs:
           await once(server, "listening");
           const address = server.address();
           if (!address || typeof address === "string") throw new Error("No local server port");
-          const browser = await chromium.launch({ headless: true });
+          const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || "/usr/bin/chromium-browser";
+          console.log("BROWSER_EXECUTABLE=" + chromiumExecutablePath);
+          const browser = await chromium.launch({ executablePath: chromiumExecutablePath, headless: true, args: ["--no-sandbox"] });
           try {
             const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
             await page.goto(`http://127.0.0.1:${address.port}/`, { waitUntil: "domcontentloaded" });
