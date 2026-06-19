@@ -1,0 +1,51 @@
+name: Issue 94713 Targeted Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Branch, tag, or commit SHA to test
+        required: true
+        type: string
+      test_name:
+        description: Vitest test name pattern
+        required: false
+        default: provider-qualified
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-94713-targeted-proof-${{ github.event.inputs.target_ref }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PNPM_CONFIG_STORE_DIR: "/tmp/openclaw-pnpm-store"
+  PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: "false"
+
+jobs:
+  targeted-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout target ref
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_REF: ${{ inputs.target_ref }}
+        run: |
+          set -euo pipefail
+          git init "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" config gc.auto 0
+          git -C "$GITHUB_WORKSPACE" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+          git -C "$GITHUB_WORKSPACE" fetch --no-tags --prune --no-recurse-submodules --depth=20 origin \
+            "+${CHECKOUT_REF}:refs/remotes/origin/target"
+          git -C "$GITHUB_WORKSPACE" checkout --detach refs/remotes/origin/target
+          git -C "$GITHUB_WORKSPACE" rev-parse HEAD
+      - name: Setup Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          install-bun: "false"
+      - name: Run targeted model-selection regression
+        run: node scripts/run-vitest.mjs run src/auto-reply/reply/model-selection.test.ts -t "${{ inputs.test_name }}"
