@@ -434,16 +434,13 @@ function sanitizeProgressMarkdownText(text: string): string {
   return text.replaceAll("`", "'");
 }
 
-function formatProgressAsMarkdownCode(text: string): string {
-  const clipped = clipProgressMarkdownText(text);
-  return `\`${sanitizeProgressMarkdownText(clipped)}\``;
-}
-
 function formatTelegramProgressLine(text: string): string {
   const trimmed = text.trim();
-  return trimmed.startsWith("_") && trimmed.endsWith("_")
-    ? trimmed
-    : formatProgressAsMarkdownCode(text);
+  const italic = trimmed.match(/^_(.*)_$/u);
+  if (italic) {
+    return sanitizeProgressMarkdownText(clipProgressMarkdownText(italic[1] ?? ""));
+  }
+  return sanitizeProgressMarkdownText(clipProgressMarkdownText(text));
 }
 
 function escapeTelegramProgressHtml(text: string): string {
@@ -454,37 +451,42 @@ function escapeTelegramProgressHtml(text: string): string {
     .replaceAll('"', "&quot;");
 }
 
-function renderTelegramProgressStringLine(text: string): string {
+function normalizeTelegramProgressPlainLine(text: string): string {
   const clipped = clipProgressMarkdownText(text.trim());
   const italic = clipped.match(/^_(.*)_$/u);
   if (italic) {
-    return `<i>${escapeTelegramProgressHtml(italic[1] ?? "")}</i>`;
+    return italic[1] ?? "";
   }
-  return `<code>${escapeTelegramProgressHtml(clipped)}</code>`;
+  return clipped;
+}
+
+function renderTelegramProgressStringLine(text: string): string {
+  return escapeTelegramProgressHtml(normalizeTelegramProgressPlainLine(text));
+}
+
+function formatTelegramProgressStructuredLine(line: ChannelProgressDraftCompositorLine): string {
+  if (typeof line === "string") {
+    return line;
+  }
+  const status = line.status?.trim();
+  const normalizedText = normalizeTelegramProgressPlainLine(line.text);
+  if (
+    status &&
+    status !== "completed" &&
+    status !== line.detail &&
+    !normalizedText.includes(status)
+  ) {
+    return `${normalizedText} ${status}`.trim();
+  }
+  return normalizedText;
 }
 
 function renderTelegramProgressLine(line: ChannelProgressDraftCompositorLine): string {
-  if (typeof line === "string") {
-    return line.split(/\r?\n/u).map(renderTelegramProgressStringLine).filter(Boolean).join("<br>");
-  }
-  if (!line.icon && line.label === "Commentary") {
-    return renderTelegramProgressStringLine(line.text);
-  }
-  const label = [line.icon, line.label].filter(Boolean).join(" ");
-  const parts = [`<b>${escapeTelegramProgressHtml(label)}</b>`];
-  const detail = line.detail && line.detail !== line.label ? line.detail : undefined;
-  if (detail) {
-    parts.push(`<code>${escapeTelegramProgressHtml(clipProgressMarkdownText(detail))}</code>`);
-  } else {
-    const text = line.text.trim();
-    if (text && text !== label) {
-      parts.push(renderTelegramProgressStringLine(text));
-    }
-  }
-  if (line.status && line.status !== "completed" && line.status !== line.detail) {
-    parts.push(`<i>${escapeTelegramProgressHtml(line.status)}</i>`);
-  }
-  return parts.join(" ");
+  return formatTelegramProgressStructuredLine(line)
+    .split(/\r?\n/u)
+    .map(renderTelegramProgressStringLine)
+    .filter(Boolean)
+    .join("<br>");
 }
 
 function renderTelegramProgressDraftPreview(
@@ -500,7 +502,7 @@ function renderTelegramProgressDraftPreview(
     : renderedLines;
   const html = htmlParts.join("<br>");
   if (!richMessages) {
-    return { text: html, parseMode: "HTML" };
+    return { text: trimmed };
   }
   return {
     text: trimmed,

@@ -398,10 +398,6 @@ describe("dispatchTelegramMessage draft streaming", () => {
     return expectRecordFields(mockCallArg(dispatchReplyWithBufferedBlockDispatcher), expected);
   }
 
-  function telegramHtmlPreview(html: string) {
-    return { text: html, parseMode: "HTML" as const };
-  }
-
   function createContext(overrides?: Partial<TelegramMessageContext>): TelegramMessageContext {
     const base = {
       ctxPayload: {},
@@ -2475,7 +2471,7 @@ describe("dispatchTelegramMessage draft streaming", () => {
     expect(answerDraftStream.update).toHaveBeenNthCalledWith(1, "Site A shows X.");
     expect(answerDraftStream.update).toHaveBeenNthCalledWith(2, "Site A shows X.");
     expect(answerDraftStream.updatePreview).toHaveBeenCalledWith(
-      expect.objectContaining({ text: expect.stringMatching(/<b>🛠️ Exec<\/b>$/) }),
+      expect.objectContaining({ text: expect.stringMatching(/🛠️ Exec$/) }),
     );
     expect(answerDraftStream.update).toHaveBeenNthCalledWith(3, "Final answer");
     expect(answerDraftStream.clear).toHaveBeenCalledTimes(1);
@@ -2502,7 +2498,7 @@ describe("dispatchTelegramMessage draft streaming", () => {
 
     expect(answerDraftStream.update).toHaveBeenNthCalledWith(1, "Site A shows X.");
     expect(answerDraftStream.updatePreview).toHaveBeenCalledWith(
-      expect.objectContaining({ text: expect.stringMatching(/<b>🛠️ Exec<\/b>$/) }),
+      expect.objectContaining({ text: expect.stringMatching(/🛠️ Exec$/) }),
     );
     expect(answerDraftStream.update).toHaveBeenNthCalledWith(2, "Site B shows Y.");
     expect(answerDraftStream.update).toHaveBeenNthCalledWith(3, "Final answer");
@@ -2544,7 +2540,7 @@ describe("dispatchTelegramMessage draft streaming", () => {
     await dispatchWithContext({ context: createContext() });
 
     expect(answerDraftStream.updatePreview).toHaveBeenCalledWith(
-      expect.objectContaining({ text: expect.stringMatching(/<b>🛠️ Exec<\/b>$/) }),
+      expect.objectContaining({ text: expect.stringMatching(/🛠️ Exec$/) }),
     );
     expect(answerDraftStream.update).toHaveBeenNthCalledWith(1, "Branch is up to date");
     expect(answerDraftStream.forceNewMessage).toHaveBeenCalledTimes(1);
@@ -2570,7 +2566,7 @@ describe("dispatchTelegramMessage draft streaming", () => {
     await dispatchWithContext({ context: createContext() });
 
     expect(answerDraftStream.updatePreview).toHaveBeenCalledWith(
-      expect.objectContaining({ text: expect.stringMatching(/<b>🛠️ Exec<\/b>$/) }),
+      expect.objectContaining({ text: expect.stringMatching(/🛠️ Exec$/) }),
     );
     expect(answerDraftStream.update).toHaveBeenNthCalledWith(1, "Branch is up to date");
     expect(answerDraftStream.forceNewMessage).toHaveBeenCalledTimes(1);
@@ -2624,11 +2620,9 @@ describe("dispatchTelegramMessage draft streaming", () => {
       telegramCfg: { streaming: { mode: "progress" } },
     });
 
-    expect(answerDraftStream.updatePreview).toHaveBeenCalledWith(
-      telegramHtmlPreview(
-        "<b>Cracking</b><br><b>🛠️ Exec</b><br><b>🛠️ Exec</b> <code>git rev-parse --abbrev-ref HEAD</code>",
-      ),
-    );
+    expect(answerDraftStream.updatePreview).toHaveBeenCalledWith({
+      text: "Cracking\n\n🛠️ Exec\n🛠️ git rev-parse --abbrev-ref HEAD",
+    });
     expect(answerDraftStream.update).not.toHaveBeenCalledWith("Branch is up to date");
     expect(answerDraftStream.forceNewMessage).toHaveBeenCalledTimes(1);
     expect(answerDraftStream.clear).toHaveBeenCalledTimes(1);
@@ -2686,9 +2680,9 @@ describe("dispatchTelegramMessage draft streaming", () => {
     const lastUpdate = answerDraftStream.updatePreview.mock.calls.at(-1)?.[0];
     expect(lastUpdate?.text).toContain("install dependencies");
     expect(lastUpdate?.text).not.toContain("completed");
-    expect(lastUpdate).toEqual(
-      telegramHtmlPreview("<b>Shelling</b><br><b>🛠️ Exec</b> <code>install dependencies</code>"),
-    );
+    expect(lastUpdate).toEqual({
+      text: "Shelling\n\n🛠️ install dependencies",
+    });
   });
 
   it("sends trailing verbose status after a progress-mode final answer", async () => {
@@ -2708,9 +2702,9 @@ describe("dispatchTelegramMessage draft streaming", () => {
       telegramCfg: { streaming: { mode: "progress" } },
     });
 
-    expect(answerDraftStream.updatePreview).toHaveBeenCalledWith(
-      telegramHtmlPreview("<b>Cracking</b><br><b>🛠️ Exec</b>"),
-    );
+    expect(answerDraftStream.updatePreview).toHaveBeenCalledWith({
+      text: "Cracking\n\n🛠️ Exec",
+    });
     expect(answerDraftStream.update).toHaveBeenCalledTimes(1);
     expect(answerDraftStream.update).toHaveBeenNthCalledWith(1, trailingFinalStatusText);
     expect(answerDraftStream.forceNewMessage).toHaveBeenCalledTimes(2);
@@ -2806,7 +2800,7 @@ describe("dispatchTelegramMessage draft streaming", () => {
     );
     expect(answerDraftStream.updatePreview).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        text: "<b>Shelling</b><br><b>🛠️ Exec</b><br><b>🔎 Web Search</b> <code>docs lookup</code>",
+        text: "Shelling\n\n🛠️ Exec\n🔎 Web Search: docs lookup",
       }),
     );
     expect(deliverReplies).not.toHaveBeenCalled();
@@ -2830,9 +2824,9 @@ describe("dispatchTelegramMessage draft streaming", () => {
     });
 
     expect(answerDraftStream.updatePreview).toHaveBeenCalledTimes(1);
-    expect(answerDraftStream.updatePreview).toHaveBeenCalledWith(
-      telegramHtmlPreview("<b>Shelling</b><br><b>🛠️ Exec</b>"),
-    );
+    expect(answerDraftStream.updatePreview).toHaveBeenCalledWith({
+      text: "Shelling\n\n🛠️ Exec",
+    });
     expectDeliveredReply(0, { text: "Branch is up to date" });
   });
 
@@ -2860,9 +2854,9 @@ describe("dispatchTelegramMessage draft streaming", () => {
     });
 
     expect(answerDraftStream.updatePreview).toHaveBeenCalledTimes(1);
-    expect(answerDraftStream.updatePreview).toHaveBeenCalledWith(
-      telegramHtmlPreview("<b>Shelling</b><br><b>🛠️ Exec</b>"),
-    );
+    expect(answerDraftStream.updatePreview).toHaveBeenCalledWith({
+      text: "Shelling\n\n🛠️ Exec",
+    });
     expectDeliveredReply(0, { text: "Branch is up to date" });
   });
 
@@ -2894,9 +2888,9 @@ describe("dispatchTelegramMessage draft streaming", () => {
     });
 
     expect(answerDraftStream.updatePreview).toHaveBeenCalledTimes(1);
-    expect(answerDraftStream.updatePreview).toHaveBeenCalledWith(
-      telegramHtmlPreview("<b>Shelling</b><br><b>🛠️ Exec</b>"),
-    );
+    expect(answerDraftStream.updatePreview).toHaveBeenCalledWith({
+      text: "Shelling\n\n🛠️ Exec",
+    });
     expectDeliveredReply(0, { text: "Branch is up to date" });
   });
 
@@ -3044,9 +3038,9 @@ describe("dispatchTelegramMessage draft streaming", () => {
       telegramCfg: { streaming: { mode: "progress", progress: { label: "Shelling" } } },
     });
 
-    expect(draftStream.updatePreview).toHaveBeenCalledWith(
-      telegramHtmlPreview("<b>Shelling</b><br><b>🛠️ Exec</b>"),
-    );
+    expect(draftStream.updatePreview).toHaveBeenCalledWith({
+      text: "Shelling\n\n🛠️ Exec",
+    });
     expect(draftStream.flush).toHaveBeenCalled();
   });
 
@@ -3084,11 +3078,9 @@ describe("dispatchTelegramMessage draft streaming", () => {
       },
     });
 
-    expect(draftStream.updatePreview).toHaveBeenLastCalledWith(
-      telegramHtmlPreview(
-        "<b>Shelling</b><br><b>🛠️ Exec</b> <code>command false</code> <i>exit 2</i>",
-      ),
-    );
+    expect(draftStream.updatePreview).toHaveBeenLastCalledWith({
+      text: "Shelling\n\n🛠️ exit 2; command false",
+    });
   });
 
   it("hides command titles in Telegram status-only progress draft previews", async () => {
@@ -3125,9 +3117,9 @@ describe("dispatchTelegramMessage draft streaming", () => {
       },
     });
 
-    expect(draftStream.updatePreview).toHaveBeenLastCalledWith(
-      telegramHtmlPreview("<b>Shelling</b><br><b>🛠️ Exec</b> <code>exit 2</code>"),
-    );
+    expect(draftStream.updatePreview).toHaveBeenLastCalledWith({
+      text: "Shelling\n\n🛠️ exit 2",
+    });
   });
 
   it("composes streamed reasoning with tool progress in Telegram progress drafts", async () => {
@@ -3148,9 +3140,9 @@ describe("dispatchTelegramMessage draft streaming", () => {
     });
 
     expect(createTelegramDraftStream).toHaveBeenCalledTimes(1);
-    expect(draftStream.updatePreview).toHaveBeenCalledWith(
-      telegramHtmlPreview("<b>Shelling</b><br><b>🛠️ Exec</b><br><i>Checking files</i>"),
-    );
+    expect(draftStream.updatePreview).toHaveBeenCalledWith({
+      text: "Shelling\n\n🛠️ Exec\n• Checking files",
+    });
   });
 
   it("renders configured Telegram commentary progress from preamble item events", async () => {
@@ -3177,9 +3169,9 @@ describe("dispatchTelegramMessage draft streaming", () => {
       },
     });
 
-    expect(draftStream.updatePreview).toHaveBeenCalledWith(
-      telegramHtmlPreview("<b>Shelling</b><br><i>Checking recent context</i>"),
-    );
+    expect(draftStream.updatePreview).toHaveBeenCalledWith({
+      text: "Shelling\n\nChecking recent context",
+    });
   });
 
   it("suppresses Telegram preamble progress when commentary is disabled", async () => {
@@ -3234,7 +3226,7 @@ describe("dispatchTelegramMessage draft streaming", () => {
       },
     });
 
-    expect(draftStream.updatePreview).toHaveBeenCalledWith(telegramHtmlPreview("<b>Shelling</b>"));
+    expect(draftStream.updatePreview).toHaveBeenCalledWith({ text: "Shelling" });
     expect(draftStream.flush).toHaveBeenCalled();
   });
 
@@ -3264,17 +3256,11 @@ describe("dispatchTelegramMessage draft streaming", () => {
     });
 
     await vi.waitFor(() =>
-      expect(draftStream.updatePreview).toHaveBeenCalledWith(telegramHtmlPreview("<b>Working</b>")),
+      expect(draftStream.updatePreview).toHaveBeenCalledWith({ text: "Working" }),
     );
-    expect(draftStream.updatePreview).not.toHaveBeenCalledWith(
-      telegramHtmlPreview("<b>Working.</b>"),
-    );
-    expect(draftStream.updatePreview).not.toHaveBeenCalledWith(
-      telegramHtmlPreview("<b>Working..</b>"),
-    );
-    expect(draftStream.updatePreview).not.toHaveBeenCalledWith(
-      telegramHtmlPreview("<b>Working...</b>"),
-    );
+    expect(draftStream.updatePreview).not.toHaveBeenCalledWith({ text: "Working." });
+    expect(draftStream.updatePreview).not.toHaveBeenCalledWith({ text: "Working.." });
+    expect(draftStream.updatePreview).not.toHaveBeenCalledWith({ text: "Working..." });
     finishRun?.();
     await run;
   });
@@ -3297,7 +3283,7 @@ describe("dispatchTelegramMessage draft streaming", () => {
       const updateBeforeStatusReaction = draftStream.updatePreview.mock.calls.at(-1)?.[0]?.text;
       releaseSetTool?.();
       await pendingToolStart;
-      expect(updateBeforeStatusReaction).toBe("<b>Shelling</b><br><b>🛠️ Exec</b>");
+      expect(updateBeforeStatusReaction).toBe("Shelling\n\n🛠️ Exec");
       return { queuedFinal: false };
     });
 
@@ -3333,11 +3319,9 @@ describe("dispatchTelegramMessage draft streaming", () => {
       telegramCfg: { streaming: { mode: "progress", progress: { label: "Shelling" } } },
     });
 
-    expect(draftStream.updatePreview).toHaveBeenCalledWith(
-      telegramHtmlPreview(
-        "<b>Shelling</b><br><b>🔎 Web Search</b> <code>docs lookup</code><br><b>Update</b> <code>tests passed</code>",
-      ),
-    );
+    expect(draftStream.updatePreview).toHaveBeenCalledWith({
+      text: "Shelling\n\n🔎 Web Search: docs lookup\n• tests passed",
+    });
     expect(draftStream.forceNewMessage).toHaveBeenCalledTimes(1);
     expect(draftStream.materialize).not.toHaveBeenCalled();
     expect(draftStream.clear).toHaveBeenCalledTimes(1);
