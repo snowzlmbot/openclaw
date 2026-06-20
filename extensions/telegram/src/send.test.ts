@@ -1031,6 +1031,35 @@ describe("sendMessageTelegram", () => {
     expect(richHtml).toContain("nested<br>line");
   });
 
+  it("preserves plain line breaks in native rich final messages", async () => {
+    botApi.sendMessage.mockResolvedValue({ message_id: 45, chat: { id: "123" } });
+
+    await sendMessageTelegram("123", "第一行\n第二行\n\n第三行", {
+      cfg: { channels: { telegram: { richMessages: true } } },
+      token: "tok",
+    });
+
+    expect(botRawApi.sendRichMessage).toHaveBeenCalledTimes(1);
+    expect(botRawApi.sendRichMessage.mock.calls[0]?.[0]?.rich_message.html).toContain(
+      "第一行<br>第二行<br><br>第三行",
+    );
+  });
+
+  it("keeps preformatted rich HTML newlines literal", async () => {
+    botApi.sendMessage.mockResolvedValue({ message_id: 45, chat: { id: "123" } });
+
+    await sendMessageTelegram("123", "<pre><code>one\ntwo</code></pre>after\nline", {
+      cfg: { channels: { telegram: { richMessages: true } } },
+      token: "tok",
+      textMode: "html",
+    });
+
+    expect(botRawApi.sendRichMessage).toHaveBeenCalledTimes(1);
+    const richHtml = botRawApi.sendRichMessage.mock.calls[0]?.[0]?.rich_message.html ?? "";
+    expect(richHtml).toContain("<pre><code>one\ntwo</code></pre>");
+    expect(richHtml).toContain("after<br>line");
+  });
+
   it("preserves nonempty Markdown when rich rendering is empty", async () => {
     botApi.sendMessage.mockResolvedValue({ message_id: 45, chat: { id: "123" } });
     const markdown = "[reference]: https://example.com";

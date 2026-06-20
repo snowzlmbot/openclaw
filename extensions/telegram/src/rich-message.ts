@@ -187,7 +187,56 @@ export function buildTelegramRichMessage(
 }
 
 function prepareTelegramRichHtml(html: string): string {
-  return limitTelegramRichHtmlNesting(sanitizeTelegramRichHtml(html), TELEGRAM_RICH_NESTING_LIMIT);
+  return limitTelegramRichHtmlNesting(
+    preserveTelegramRichHtmlTextLineBreaks(sanitizeTelegramRichHtml(html)),
+    TELEGRAM_RICH_NESTING_LIMIT,
+  );
+}
+
+function preserveTelegramRichHtmlTextLineBreaks(html: string): string {
+  if (!html.includes("\n")) {
+    return html;
+  }
+
+  let output = "";
+  let lastIndex = 0;
+  let preformattedDepth = 0;
+  const tagPattern = /<\/?([a-zA-Z][\w:-]*)\b[^>]*>/g;
+
+  const appendText = (text: string): void => {
+    if (!text) {
+      return;
+    }
+    if (preformattedDepth > 0 || !/[^\s]/u.test(text)) {
+      output += text;
+      return;
+    }
+    output += text.replace(/\n/g, "<br>");
+  };
+
+  for (const match of html.matchAll(tagPattern)) {
+    appendText(html.slice(lastIndex, match.index));
+
+    const rawTag = match[0] ?? "";
+    const tagName = (match[1] ?? "").toLowerCase();
+    const isClosing = rawTag.startsWith("</");
+    const isSelfClosing = /\/\s*>$/.test(rawTag) || tagName === "br";
+
+    if ((tagName === "pre" || tagName === "code") && isClosing) {
+      preformattedDepth = Math.max(0, preformattedDepth - 1);
+    }
+
+    output += rawTag;
+
+    if ((tagName === "pre" || tagName === "code") && !isClosing && !isSelfClosing) {
+      preformattedDepth += 1;
+    }
+
+    lastIndex = (match.index ?? 0) + rawTag.length;
+  }
+
+  appendText(html.slice(lastIndex));
+  return output;
 }
 
 const TELEGRAM_RICH_HTML_CHUNK_LIMITS = {
