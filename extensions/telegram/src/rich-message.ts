@@ -200,14 +200,19 @@ function preserveTelegramRichHtmlTextLineBreaks(html: string): string {
 
   let output = "";
   let lastIndex = 0;
-  let preformattedDepth = 0;
+  let protectedDepth = 0;
   const tagPattern = /<\/?([a-zA-Z][\w:-]*)\b[^>]*>/g;
+  let previousTag: TelegramRichHtmlLineBreakTag | undefined;
 
-  const appendText = (text: string): void => {
+  const appendText = (
+    text: string,
+    previous: TelegramRichHtmlLineBreakTag | undefined,
+    next: TelegramRichHtmlLineBreakTag | undefined,
+  ): void => {
     if (!text) {
       return;
     }
-    if (preformattedDepth > 0 || !/[^\s]/u.test(text)) {
+    if (protectedDepth > 0 || !shouldMaterializeTelegramRichHtmlTextLineBreaks(text, previous, next)) {
       output += text;
       return;
     }
@@ -215,28 +220,93 @@ function preserveTelegramRichHtmlTextLineBreaks(html: string): string {
   };
 
   for (const match of html.matchAll(tagPattern)) {
-    appendText(html.slice(lastIndex, match.index));
-
     const rawTag = match[0] ?? "";
     const tagName = (match[1] ?? "").toLowerCase();
     const isClosing = rawTag.startsWith("</");
     const isSelfClosing = /\/\s*>$/.test(rawTag) || tagName === "br";
+    const currentTag = { tagName, isClosing, isSelfClosing };
 
-    if ((tagName === "pre" || tagName === "code") && isClosing) {
-      preformattedDepth = Math.max(0, preformattedDepth - 1);
+    appendText(html.slice(lastIndex, match.index), previousTag, currentTag);
+
+    if (TELEGRAM_RICH_LINE_BREAK_PROTECTED_TAGS.has(tagName) && isClosing) {
+      protectedDepth = Math.max(0, protectedDepth - 1);
     }
 
     output += rawTag;
 
-    if ((tagName === "pre" || tagName === "code") && !isClosing && !isSelfClosing) {
-      preformattedDepth += 1;
+    if (TELEGRAM_RICH_LINE_BREAK_PROTECTED_TAGS.has(tagName) && !isClosing && !isSelfClosing) {
+      protectedDepth += 1;
     }
 
+    previousTag = currentTag;
     lastIndex = (match.index ?? 0) + rawTag.length;
   }
 
-  appendText(html.slice(lastIndex));
+  appendText(html.slice(lastIndex), previousTag, undefined);
   return output;
+}
+
+type TelegramRichHtmlLineBreakTag = {
+  tagName: string;
+  isClosing: boolean;
+  isSelfClosing: boolean;
+};
+
+const TELEGRAM_RICH_LINE_BREAK_PROTECTED_TAGS = new Set(["code", "pre", "tg-math", "tg-math-block"]);
+const TELEGRAM_RICH_LINE_BREAK_BLOCK_TAGS = new Set([
+  "aside",
+  "audio",
+  "blockquote",
+  "details",
+  "figure",
+  "footer",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "hr",
+  "img",
+  "li",
+  "ol",
+  "p",
+  "pre",
+  "table",
+  "tg-collage",
+  "tg-map",
+  "tg-math-block",
+  "tg-slideshow",
+  "tr",
+  "ul",
+  "video",
+]);
+
+function shouldMaterializeTelegramRichHtmlTextLineBreaks(
+  text: string,
+  previousTag: TelegramRichHtmlLineBreakTag | undefined,
+  nextTag: TelegramRichHtmlLineBreakTag | undefined,
+): boolean {
+  if (!text.includes("\n")) {
+    return false;
+  }
+  if (/[^\s]/u.test(text)) {
+    return true;
+  }
+  return isTelegramRichInlineLineBreakBoundary(previousTag, nextTag);
+}
+
+function isTelegramRichInlineLineBreakBoundary(
+  previousTag: TelegramRichHtmlLineBreakTag | undefined,
+  nextTag: TelegramRichHtmlLineBreakTag | undefined,
+): boolean {
+  if (!previousTag || !nextTag || !previousTag.isClosing || nextTag.isClosing) {
+    return false;
+  }
+  return (
+    !TELEGRAM_RICH_LINE_BREAK_BLOCK_TAGS.has(previousTag.tagName) &&
+    !TELEGRAM_RICH_LINE_BREAK_BLOCK_TAGS.has(nextTag.tagName)
+  );
 }
 
 const TELEGRAM_RICH_HTML_CHUNK_LIMITS = {

@@ -1060,6 +1060,36 @@ describe("sendMessageTelegram", () => {
     expect(richHtml).toContain("after<br>line");
   });
 
+  it("preserves line breaks between formatted inline rich HTML nodes", async () => {
+    botApi.sendMessage.mockResolvedValue({ message_id: 45, chat: { id: "123" } });
+
+    await sendMessageTelegram("123", "<b>one</b>\n<a href=\"https://example.com\">two</a>", {
+      cfg: { channels: { telegram: { richMessages: true } } },
+      token: "tok",
+      textMode: "html",
+    });
+
+    expect(botRawApi.sendRichMessage).toHaveBeenCalledTimes(1);
+    expect(botRawApi.sendRichMessage.mock.calls[0]?.[0]?.rich_message.html).toContain(
+      '<b>one</b><br><a href="https://example.com">two</a>',
+    );
+  });
+
+  it("keeps math rich HTML newlines literal", async () => {
+    botApi.sendMessage.mockResolvedValue({ message_id: 45, chat: { id: "123" } });
+
+    await sendMessageTelegram("123", "<tg-math>x\ny</tg-math>after\nline", {
+      cfg: { channels: { telegram: { richMessages: true } } },
+      token: "tok",
+      textMode: "html",
+    });
+
+    expect(botRawApi.sendRichMessage).toHaveBeenCalledTimes(1);
+    const richHtml = botRawApi.sendRichMessage.mock.calls[0]?.[0]?.rich_message.html ?? "";
+    expect(richHtml).toContain("<tg-math>x\ny</tg-math>");
+    expect(richHtml).toContain("after<br>line");
+  });
+
   it("preserves nonempty Markdown when rich rendering is empty", async () => {
     botApi.sendMessage.mockResolvedValue({ message_id: 45, chat: { id: "123" } });
     const markdown = "[reference]: https://example.com";
