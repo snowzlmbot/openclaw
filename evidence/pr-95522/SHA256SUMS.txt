@@ -1,0 +1,3 @@
+990b8308435a98ce0c7094f10a50e8f4126dd340ffa8de46bfaf1f790eeb488e  /root/.openclaw/workspace/projects/openclaw-pr-maintenance/evidence-publish/pr-95522-telegram-proof/evidence/pr-95522/telegram-proof-core.gif
+d5e7001bd73d0f87b861a93966af01390ce666af1f6eb53b5f7cc6e15ed4b2a9  /root/.openclaw/workspace/projects/openclaw-pr-maintenance/evidence-publish/pr-95522-telegram-proof/evidence/pr-95522/telegram-proof-core.mp4
+b1d915c321c566087f306853d47c89d0230f1a4ada76ecf919e6a36f2851ba68  /root/.openclaw/workspace/projects/openclaw-pr-maintenance/evidence-publish/pr-95522-telegram-proof/evidence/pr-95522/telegram-proof-cropped.gif
