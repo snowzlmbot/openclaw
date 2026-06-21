@@ -331,13 +331,13 @@ export function createTelegramDraftStream(params: {
     }
   };
   const scheduleInitialPreviewFlush = (delayMs: number) => {
-    if (initialPreviewTimer || !flushInitialPreview) {
+    if (initialPreviewTimer) {
       return;
     }
     initialPreviewTimer = setTimeout(
       () => {
         initialPreviewTimer = undefined;
-        void flushInitialPreview?.().catch((err: unknown) => {
+        void flushInitialPreview().catch((err: unknown) => {
           params.warn?.(`telegram stream preview delayed send failed: ${formatErrorMessage(err)}`);
         });
       },
