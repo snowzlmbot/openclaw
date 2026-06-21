@@ -30,6 +30,7 @@ import {
   type ChannelProgressDraftLine,
   type ChannelProgressDraftCompositorLine,
   createChannelProgressDraftCompositor,
+  resolveChannelProgressDraftLabel,
   resolveChannelStreamingBlockEnabled,
   resolveTranscriptBackedChannelFinalText,
 } from "openclaw/plugin-sdk/channel-outbound";
@@ -434,15 +435,6 @@ function sanitizeProgressMarkdownText(text: string): string {
   return text.replaceAll("`", "'");
 }
 
-function formatTelegramProgressLine(text: string): string {
-  const trimmed = text.trim();
-  const italic = trimmed.match(/^_(.*)_$/u);
-  if (italic) {
-    return sanitizeProgressMarkdownText(clipProgressMarkdownText(italic[1] ?? ""));
-  }
-  return sanitizeProgressMarkdownText(clipProgressMarkdownText(text));
-}
-
 function escapeTelegramProgressHtml(text: string): string {
   return text
     .replaceAll("&", "&amp;")
@@ -451,8 +443,9 @@ function escapeTelegramProgressHtml(text: string): string {
     .replaceAll('"', "&quot;");
 }
 
-function normalizeTelegramProgressPlainLine(text: string): string {
-  const clipped = clipProgressMarkdownText(text.trim());
+function normalizeTelegramProgressText(text: string, options?: { trim?: boolean }): string {
+  const source = options?.trim === false ? text : text.trim();
+  const clipped = clipProgressMarkdownText(source);
   const italic = clipped.match(/^_(.*)_$/u);
   if (italic) {
     return italic[1] ?? "";
@@ -460,50 +453,66 @@ function normalizeTelegramProgressPlainLine(text: string): string {
   return clipped;
 }
 
-function renderTelegramProgressStringLine(text: string): string {
-  return escapeTelegramProgressHtml(normalizeTelegramProgressPlainLine(text));
+function formatTelegramProgressLine(text: string): string {
+  return sanitizeProgressMarkdownText(normalizeTelegramProgressText(text, { trim: false }));
 }
 
-function formatTelegramProgressStructuredLine(line: ChannelProgressDraftCompositorLine): string {
+function renderTelegramProgressHtmlStringLine(text: string): string {
+  const normalized = normalizeTelegramProgressText(text);
+  const italic = text.trim().match(/^_(.*)_$/u);
+  if (italic) {
+    return `<i>${escapeTelegramProgressHtml(normalized)}</i>`;
+  }
+  return `<code>${escapeTelegramProgressHtml(normalized)}</code>`;
+}
+
+function renderTelegramProgressHtmlLine(line: ChannelProgressDraftCompositorLine): string {
   if (typeof line === "string") {
-    return line;
+    return line
+      .split(/\r?\n/u)
+      .map(renderTelegramProgressHtmlStringLine)
+      .filter(Boolean)
+      .join("\n");
   }
-  const status = line.status?.trim();
-  const normalizedText = normalizeTelegramProgressPlainLine(line.text);
-  if (
-    status &&
-    status !== "completed" &&
-    status !== line.detail &&
-    !normalizedText.includes(status)
-  ) {
-    return `${normalizedText} ${status}`.trim();
+  if (!line.icon && line.label === "Commentary") {
+    return renderTelegramProgressHtmlStringLine(line.text);
   }
-  return normalizedText;
-}
-
-function renderTelegramProgressLine(line: ChannelProgressDraftCompositorLine): string {
-  return formatTelegramProgressStructuredLine(line)
-    .split(/\r?\n/u)
-    .map(renderTelegramProgressStringLine)
-    .filter(Boolean)
-    .join("<br>");
+  const label = [line.icon, line.label].filter(Boolean).join(" ");
+  const parts = [`<b>${escapeTelegramProgressHtml(label)}</b>`];
+  const detail = line.detail && line.detail !== line.label ? line.detail : undefined;
+  if (detail) {
+    parts.push(`<code>${escapeTelegramProgressHtml(clipProgressMarkdownText(detail))}</code>`);
+  } else {
+    const text = line.text.trim();
+    if (text && text !== label) {
+      parts.push(renderTelegramProgressHtmlStringLine(text));
+    }
+  }
+  if (line.status && line.status !== "completed" && line.status !== line.detail) {
+    parts.push(`<i>${escapeTelegramProgressHtml(line.status)}</i>`);
+  }
+  return parts.join(" ");
 }
 
 function renderTelegramProgressDraftPreview(
   text: string,
   lines: readonly ChannelProgressDraftCompositorLine[],
-  richMessages: boolean,
+  label: string | undefined,
 ): TelegramDraftPreview {
   const trimmed = text.trimEnd();
-  const [heading] = trimmed.split(/\r?\n/u, 1);
-  const renderedLines = lines.map(renderTelegramProgressLine).filter(Boolean);
-  const htmlParts = heading?.trim()
-    ? [`<b>${escapeTelegramProgressHtml(heading.trim())}</b>`, ...renderedLines]
-    : renderedLines;
-  const html = htmlParts.join("<br>");
-  if (!richMessages) {
-    return { text: trimmed };
-  }
+  const textLines = trimmed.split(/\r?\n/u);
+  const labelVisible =
+    label !== undefined &&
+    (trimmed === label || (textLines[0] === label && textLines[1] === ""));
+  const bodyLines = labelVisible
+    ? textLines.slice(textLines[1] === "" ? 2 : 1)
+    : textLines;
+  const renderedLines = lines.map(renderTelegramProgressHtmlLine).filter(Boolean);
+  const visibleLines = renderedLines.slice(-bodyLines.filter(Boolean).length);
+  const htmlParts = labelVisible
+    ? [`<b>${escapeTelegramProgressHtml(label)}</b>`, ...visibleLines]
+    : visibleLines;
+  const html = htmlParts.join("\n");
   return {
     text: trimmed,
     richMessage: buildTelegramRichHtml(html, { skipEntityDetection: true }),
@@ -1109,7 +1118,7 @@ export const dispatchTelegramMessage = async ({
         renderTelegramProgressDraftPreview(
           streamText,
           options?.lines ?? [],
-          telegramCfg.richMessages === true,
+          resolveChannelProgressDraftLabel({ entry: telegramCfg, seed: progressSeed }),
         ),
       );
       if (options?.flush) {

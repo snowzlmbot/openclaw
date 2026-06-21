@@ -376,8 +376,7 @@ export function createTelegramDraftStream(params: {
     const renderedPayloadLength = richMessages
       ? telegramDraftRichPayloadLength(rendered)
       : renderedText.length;
-    const renderedPreview = { ...rendered, text: renderedText };
-    const renderedPreviewKey = telegramDraftPreviewKey(renderedPreview);
+    const renderedPreviewKey = telegramDraftPreviewKey({ ...rendered, text: renderedText });
     if (!renderedText) {
       return false;
     }
@@ -454,7 +453,7 @@ export function createTelegramDraftStream(params: {
     lastSentPreviewKey = renderedPreviewKey;
     try {
       const sent = await sendMessageTransportPreview({
-        preview: renderedPreview,
+        preview: rendered,
         sendGeneration,
       });
       if (sent) {
