@@ -1126,6 +1126,41 @@ line`;
     expect(richHtml).toContain("</table>after<br>line");
   });
 
+  it("keeps pretty-printed figure and details structure without break tags", async () => {
+    botApi.sendMessage.mockResolvedValue({ message_id: 45, chat: { id: "123" } });
+    const html = `<figure>
+  <img src="https://example.com/image.png"/>
+  <figcaption>
+    Figure caption
+  </figcaption>
+</figure>
+<details open>
+  <summary>
+    Details title
+  </summary>
+  Details body
+</details>after
+line`;
+
+    await sendMessageTelegram("123", html, {
+      cfg: { channels: { telegram: { richMessages: true } } },
+      [REDACTED:secret_assignment],
+      textMode: "html",
+    });
+
+    expect(botRawApi.sendRichMessage).toHaveBeenCalledTimes(1);
+    const richHtml = botRawApi.sendRichMessage.mock.calls[0]?.[0]?.rich_message.html ?? "";
+    expect(richHtml).not.toContain("<figcaption><br>");
+    expect(richHtml).not.toContain("Figure caption<br>");
+    expect(richHtml).not.toContain("</figcaption><br>");
+    expect(richHtml).not.toContain("</figure><br><details");
+    expect(richHtml).not.toContain("<summary><br>");
+    expect(richHtml).not.toContain("Details title<br>");
+    expect(richHtml).not.toContain("</summary><br>");
+    expect(richHtml).not.toContain("Details body<br>");
+    expect(richHtml).toContain("</details>after<br>line");
+  });
+
   it("keeps math rich HTML newlines literal", async () => {
     botApi.sendMessage.mockResolvedValue({ message_id: 45, chat: { id: "123" } });
 
