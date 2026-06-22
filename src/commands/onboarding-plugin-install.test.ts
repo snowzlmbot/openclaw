@@ -23,9 +23,11 @@ vi.mock("../cli/plugin-install-plan.js", () => ({
   resolveBundledInstallPlanForCatalogEntry,
 }));
 
-const refreshPluginRegistryAfterConfigMutation = vi.hoisted(() => vi.fn(async () => undefined));
+const invalidatePluginRuntimeDiscoveryAfterConfigMutation = vi.hoisted(() =>
+  vi.fn(async () => undefined),
+);
 vi.mock("../cli/plugins-registry-refresh.js", () => ({
-  refreshPluginRegistryAfterConfigMutation,
+  invalidatePluginRuntimeDiscoveryAfterConfigMutation,
 }));
 
 const resolveBundledPluginSources = vi.hoisted(() => vi.fn(() => new Map()));
@@ -103,6 +105,10 @@ vi.mock("../plugins/installs.js", () => ({
 const clearPluginMetadataLifecycleCaches = vi.hoisted(() => vi.fn());
 vi.mock("../plugins/plugin-metadata-lifecycle.js", () => ({
   clearPluginMetadataLifecycleCaches,
+}));
+const clearLoadInstalledPluginIndexInstallRecordsCache = vi.hoisted(() => vi.fn());
+vi.mock("../plugins/installed-plugin-index-records.js", () => ({
+  clearLoadInstalledPluginIndexInstallRecordsCache,
 }));
 
 const withTimeout = vi.hoisted(() => vi.fn(async <T>(promise: Promise<T>) => await promise));
@@ -187,7 +193,7 @@ describe("ensureOnboardingPluginInstalled", () => {
     delete process.env.OPENCLAW_ALLOW_PLUGIN_INSTALL_OVERRIDES;
     delete process.env.OPENCLAW_PLUGIN_INSTALL_OVERRIDES;
     withTimeout.mockImplementation(async <T>(promise: Promise<T>) => await promise);
-    refreshPluginRegistryAfterConfigMutation.mockResolvedValue(undefined);
+    invalidatePluginRuntimeDiscoveryAfterConfigMutation.mockResolvedValue(undefined);
   });
 
   it("localizes plugin install choices", async () => {
@@ -404,15 +410,11 @@ describe("ensureOnboardingPluginInstalled", () => {
       npmTarballName: "demo-plugin-1.2.3.tgz",
     });
     expect(result.status).toBe("installed");
+    expect(clearLoadInstalledPluginIndexInstallRecordsCache).toHaveBeenCalledOnce();
     expect(clearPluginMetadataLifecycleCaches).toHaveBeenCalledOnce();
-    expect(refreshPluginRegistryAfterConfigMutation).toHaveBeenCalledWith(
+    expect(invalidatePluginRuntimeDiscoveryAfterConfigMutation).toHaveBeenCalledWith(
       expect.objectContaining({
-        config: result.cfg,
-        installRecords: result.cfg.plugins?.installs,
-        reason: "source-changed",
-        policyPluginIds: ["demo-plugin"],
-        traceCommand: "onboarding-plugin-install",
-        workspaceDir: "/tmp/workspace",
+        logger: expect.objectContaining({ warn: expect.any(Function) }),
       }),
     );
   });
@@ -652,13 +654,11 @@ describe("ensureOnboardingPluginInstalled", () => {
     expect(installed?.pluginId).toBe("demo-plugin");
     expect(installed?.source).toBe("npm");
     expect(installed?.spec).toBe("@wecom/wecom-openclaw-plugin@1.2.3");
+    expect(clearLoadInstalledPluginIndexInstallRecordsCache).toHaveBeenCalledOnce();
     expect(clearPluginMetadataLifecycleCaches).toHaveBeenCalledOnce();
-    expect(refreshPluginRegistryAfterConfigMutation).toHaveBeenCalledWith(
+    expect(invalidatePluginRuntimeDiscoveryAfterConfigMutation).toHaveBeenCalledWith(
       expect.objectContaining({
-        config: result.cfg,
-        reason: "source-changed",
-        policyPluginIds: ["demo-plugin"],
-        traceCommand: "onboarding-plugin-install",
+        logger: expect.objectContaining({ warn: expect.any(Function) }),
       }),
     );
   });
@@ -733,8 +733,9 @@ describe("ensureOnboardingPluginInstalled", () => {
       pluginId: "demo-plugin",
       status: "timed_out",
     });
+    expect(clearLoadInstalledPluginIndexInstallRecordsCache).not.toHaveBeenCalled();
     expect(clearPluginMetadataLifecycleCaches).not.toHaveBeenCalled();
-    expect(refreshPluginRegistryAfterConfigMutation).not.toHaveBeenCalled();
+    expect(invalidatePluginRuntimeDiscoveryAfterConfigMutation).not.toHaveBeenCalled();
     expect(stop).toHaveBeenCalledWith("Install timed out: Demo Plugin");
     expect(note).toHaveBeenCalledWith(
       "Installing @demo/plugin@1.2.3 timed out after 5 minutes.\nReturning to selection.",
@@ -1241,14 +1242,11 @@ describe("ensureOnboardingPluginInstalled", () => {
       });
       expect(result.installed).toBe(true);
       expect(result.status).toBe("installed");
+      expect(clearLoadInstalledPluginIndexInstallRecordsCache).toHaveBeenCalledOnce();
       expect(clearPluginMetadataLifecycleCaches).toHaveBeenCalledOnce();
-      expect(refreshPluginRegistryAfterConfigMutation).toHaveBeenCalledWith(
+      expect(invalidatePluginRuntimeDiscoveryAfterConfigMutation).toHaveBeenCalledWith(
         expect.objectContaining({
-          config: result.cfg,
-          reason: "source-changed",
-          workspaceDir,
-          policyPluginIds: ["demo-plugin"],
-          traceCommand: "onboarding-plugin-install",
+          logger: expect.objectContaining({ warn: expect.any(Function) }),
         }),
       );
       expect(result.cfg.plugins?.installs).toEqual({

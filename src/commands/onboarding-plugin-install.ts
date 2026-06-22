@@ -9,7 +9,7 @@ import path from "node:path";
 import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { sanitizeTerminalText } from "../../packages/terminal-core/src/safe-text.js";
 import { resolveBundledInstallPlanForCatalogEntry } from "../cli/plugin-install-plan.js";
-import { refreshPluginRegistryAfterConfigMutation } from "../cli/plugins-registry-refresh.js";
+import { invalidatePluginRuntimeDiscoveryAfterConfigMutation } from "../cli/plugins-registry-refresh.js";
 import { assertConfigWriteAllowedInCurrentMode } from "../config/nix-mode-write-guard.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { parseClawHubPluginSpec } from "../infra/clawhub-spec.js";
@@ -41,6 +41,7 @@ import {
   installPluginFromNpmPackArchive,
   type InstallPluginResult,
 } from "../plugins/install.js";
+import { clearLoadInstalledPluginIndexInstallRecordsCache } from "../plugins/installed-plugin-index-records.js";
 import {
   buildNpmResolutionInstallFields,
   recordPluginInstall,
@@ -85,18 +86,13 @@ async function markOnboardingPluginInstalled(
   result: OnboardingPluginInstallResult & { installed: true },
   params: {
     runtime: RuntimeEnv;
-    workspaceDir?: string;
-    pluginId: string;
   },
 ): Promise<OnboardingPluginInstallResult & { installed: true }> {
+  // Onboarding has not committed config yet, so invalidate only process-local
+  // discovery. The next lookup recovers the new package alongside persisted records.
+  clearLoadInstalledPluginIndexInstallRecordsCache();
   clearPluginMetadataLifecycleCaches();
-  await refreshPluginRegistryAfterConfigMutation({
-    config: result.cfg,
-    reason: "source-changed",
-    installRecords: result.cfg.plugins?.installs ?? {},
-    ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
-    policyPluginIds: [params.pluginId],
-    traceCommand: "onboarding-plugin-install",
+  await invalidatePluginRuntimeDiscoveryAfterConfigMutation({
     logger: { warn: (message) => params.runtime.log(message) },
   });
   return result;
@@ -827,7 +823,6 @@ async function installPluginFromOverride(params: {
   override: PluginInstallOverride;
   prompter: WizardPrompter;
   runtime: RuntimeEnv;
-  workspaceDir?: string;
 }): Promise<OnboardingPluginInstallResult> {
   const { entry, prompter, runtime } = params;
   runtime.log?.(
@@ -946,7 +941,7 @@ async function installPluginFromOverride(params: {
       pluginId: result.pluginId,
       status: "installed",
     },
-    { runtime: params.runtime, workspaceDir: params.workspaceDir, pluginId: result.pluginId },
+    { runtime: params.runtime },
   );
 }
 
@@ -1045,7 +1040,6 @@ export async function ensureOnboardingPluginInstalled(params: {
       override: installOverride,
       prompter,
       runtime,
-      workspaceDir,
     });
   }
   const allowLocal = hasGitWorkspace(workspaceDir);
@@ -1139,7 +1133,7 @@ export async function ensureOnboardingPluginInstalled(params: {
           pluginId: entry.pluginId,
           status: "installed",
         },
-        { runtime, workspaceDir, pluginId: entry.pluginId },
+        { runtime },
       );
     }
     next = addPluginLoadPath(enableResult.config, localPath);
@@ -1151,7 +1145,7 @@ export async function ensureOnboardingPluginInstalled(params: {
         pluginId: entry.pluginId,
         status: "installed",
       },
-      { runtime, workspaceDir, pluginId: entry.pluginId },
+      { runtime },
     );
   }
 
@@ -1212,7 +1206,7 @@ export async function ensureOnboardingPluginInstalled(params: {
           pluginId: result.pluginId,
           status: "installed",
         },
-        { runtime, workspaceDir, pluginId: result.pluginId },
+        { runtime },
       );
     }
 
@@ -1337,7 +1331,7 @@ export async function ensureOnboardingPluginInstalled(params: {
         pluginId: result.pluginId,
         status: "installed",
       },
-      { runtime, workspaceDir, pluginId: result.pluginId },
+      { runtime },
     );
   }
 
@@ -1385,7 +1379,7 @@ export async function ensureOnboardingPluginInstalled(params: {
             pluginId: entry.pluginId,
             status: "installed",
           },
-          { runtime, workspaceDir, pluginId: entry.pluginId },
+          { runtime },
         );
       }
       next = addPluginLoadPath(enableResult.config, localPath);
@@ -1397,7 +1391,7 @@ export async function ensureOnboardingPluginInstalled(params: {
           pluginId: entry.pluginId,
           status: "installed",
         },
-        { runtime, workspaceDir, pluginId: entry.pluginId },
+        { runtime },
       );
     }
   }
