@@ -96,6 +96,7 @@ async function markOnboardingPluginInstalled(
     ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
     policyPluginIds: [params.pluginId],
     traceCommand: "onboarding-plugin-install",
+    logger: { warn: (message) => params.runtime.log(message) },
   });
   return result;
 }
