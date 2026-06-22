@@ -100,6 +100,11 @@ vi.mock("../plugins/installs.js", () => ({
   resolveNpmInstallRecordSpec,
 }));
 
+const clearPluginMetadataLifecycleCaches = vi.hoisted(() => vi.fn());
+vi.mock("../plugins/plugin-metadata-lifecycle.js", () => ({
+  clearPluginMetadataLifecycleCaches,
+}));
+
 const withTimeout = vi.hoisted(() => vi.fn(async <T>(promise: Promise<T>) => await promise));
 vi.mock("../utils/with-timeout.js", () => ({
   withTimeout,
@@ -398,6 +403,15 @@ describe("ensureOnboardingPluginInstalled", () => {
       npmTarballName: "demo-plugin-1.2.3.tgz",
     });
     expect(result.status).toBe("installed");
+    expect(clearPluginMetadataLifecycleCaches).toHaveBeenCalledOnce();
+    expect(refreshPluginRegistryAfterConfigMutation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: result.cfg,
+        reason: "source-changed",
+        policyPluginIds: ["demo-plugin"],
+        traceCommand: "onboarding-plugin-install",
+      }),
+    );
   });
 
   it("uses a guarded npm install override without official-trust flags", async () => {
@@ -635,7 +649,15 @@ describe("ensureOnboardingPluginInstalled", () => {
     expect(installed?.pluginId).toBe("demo-plugin");
     expect(installed?.source).toBe("npm");
     expect(installed?.spec).toBe("@wecom/wecom-openclaw-plugin@1.2.3");
-    expect(refreshPluginRegistryAfterConfigMutation).not.toHaveBeenCalled();
+    expect(clearPluginMetadataLifecycleCaches).toHaveBeenCalledOnce();
+    expect(refreshPluginRegistryAfterConfigMutation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: result.cfg,
+        reason: "source-changed",
+        policyPluginIds: ["demo-plugin"],
+        traceCommand: "onboarding-plugin-install",
+      }),
+    );
   });
 
   it("logs npm install warnings once while shortening the progress label", async () => {
@@ -708,6 +730,8 @@ describe("ensureOnboardingPluginInstalled", () => {
       pluginId: "demo-plugin",
       status: "timed_out",
     });
+    expect(clearPluginMetadataLifecycleCaches).not.toHaveBeenCalled();
+    expect(refreshPluginRegistryAfterConfigMutation).not.toHaveBeenCalled();
     expect(stop).toHaveBeenCalledWith("Install timed out: Demo Plugin");
     expect(note).toHaveBeenCalledWith(
       "Installing @demo/plugin@1.2.3 timed out after 5 minutes.\nReturning to selection.",
@@ -1070,6 +1094,7 @@ describe("ensureOnboardingPluginInstalled", () => {
       ]);
       expect(prompt.message).not.toContain("\x1b");
       expect(prompt.options[0]?.label).not.toContain("\x1b");
+      expect(clearPluginMetadataLifecycleCaches).not.toHaveBeenCalled();
     });
   });
 
@@ -1213,6 +1238,16 @@ describe("ensureOnboardingPluginInstalled", () => {
       });
       expect(result.installed).toBe(true);
       expect(result.status).toBe("installed");
+      expect(clearPluginMetadataLifecycleCaches).toHaveBeenCalledOnce();
+      expect(refreshPluginRegistryAfterConfigMutation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: result.cfg,
+          reason: "source-changed",
+          workspaceDir,
+          policyPluginIds: ["demo-plugin"],
+          traceCommand: "onboarding-plugin-install",
+        }),
+      );
       expect(result.cfg.plugins?.installs).toEqual({
         "demo-plugin": {
           pluginId: "demo-plugin",
