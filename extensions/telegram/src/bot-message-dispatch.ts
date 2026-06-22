@@ -153,7 +153,6 @@ const silentReplyDispatchLogger = createSubsystemLogger("telegram/silent-reply-d
 
 /** Minimum chars before sending first streaming message (improves push notification UX) */
 const DRAFT_MIN_INITIAL_CHARS = 30;
-const DRAFT_MIN_INITIAL_DELAY_MS = 5_000;
 
 type DraftPartialTextUpdate = {
   text: string;
@@ -1037,7 +1036,6 @@ export const dispatchTelegramMessage = async ({
           replyToMessageId: draftReplyToMessageId,
           richMessages: telegramCfg.richMessages,
           minInitialChars: draftMinInitialChars,
-          minInitialDelayMs: draftMinInitialChars > 0 ? DRAFT_MIN_INITIAL_DELAY_MS : undefined,
           renderText: renderStreamText,
           onSupersededPreview: (superseded) => {
             if (superseded.retain) {
@@ -1397,7 +1395,7 @@ export const dispatchTelegramMessage = async ({
       recomputeQueuedAnswerBlockRotations();
     }
   };
-  const updateDraftFromPartial = async (lane: DraftLaneState, update: DraftPartialTextUpdate) => {
+  const updateDraftFromPartial = (lane: DraftLaneState, update: DraftPartialTextUpdate) => {
     const laneStream = lane.stream;
     if (!laneStream || !update.text) {
       return;
@@ -1409,7 +1407,6 @@ export const dispatchTelegramMessage = async ({
     }
     if (lane === answerLane) {
       if (streamMode === "progress") {
-        await progressDraft.noteActivity();
         return;
       }
       resetAnswerToolProgressDraft();
@@ -1436,7 +1433,7 @@ export const dispatchTelegramMessage = async ({
         reasoningStepState.noteReasoningHint();
         reasoningStepState.noteReasoningDelivered();
       }
-      await updateDraftFromPartial(lanes[segment.lane], segment.update);
+      updateDraftFromPartial(lanes[segment.lane], segment.update);
     }
   };
   const flushDraftLane = async (lane: DraftLaneState) => {
@@ -2153,9 +2150,6 @@ export const dispatchTelegramMessage = async ({
                       }
                       if (segment.lane === "answer" && info.kind === "tool") {
                         if (verboseProgressActive()) {
-                          if (streamMode === "progress") {
-                            await rotateAnswerLaneAfterToolProgress();
-                          }
                           if (
                             await sendPayload(
                               applyTextToPayload(effectivePayload, segment.update.text),
@@ -2306,9 +2300,6 @@ export const dispatchTelegramMessage = async ({
                         await flushBufferedFinalAnswer();
                       }
                       return;
-                    }
-                    if (streamMode === "progress" && info.kind === "tool") {
-                      await rotateAnswerLaneAfterToolProgress();
                     }
                     const delivered = await sendPayload(effectivePayload, {
                       durable: info.kind === "final",
