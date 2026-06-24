@@ -1,0 +1,186 @@
+name: Cron Action-critical Command Output Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact PR head SHA to test
+        required: true
+        default: f53f72f6cc6b609d2f747481a230fb6002f3e309
+  push:
+    branches:
+      - proof/cron-action-critical-summary-96393
+
+permissions:
+  contents: read
+
+jobs:
+  cron-command-proof:
+    name: Cron command action-critical output proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      TARGET_SHA: ${{ github.event.inputs.target_sha || 'f53f72f6cc6b609d2f747481a230fb6002f3e309' }}
+    steps:
+      - name: Checkout proof harness branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Checkout exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "TARGET_SHA must be a 40-character SHA: $TARGET_SHA" >&2
+            exit 1
+          fi
+          git checkout --detach "$TARGET_SHA"
+          resolved="$(git rev-parse HEAD)"
+          if [[ "$resolved" != "$TARGET_SHA" ]]; then
+            echo "Checked out $resolved, expected $TARGET_SHA" >&2
+            exit 1
+          fi
+          echo "Exact PR head: $resolved" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v6
+        with:
+          node-version: 24.x
+          package-manager-cache: false
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+
+      - name: Run exact-head cron command proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proof-artifacts .proof
+          cat > .proof/cron-action-critical-summary-proof.mjs <<'NODE'
+          import fs from "node:fs";
+          import process from "node:process";
+
+          import { runCronCommandJob } from "../src/cron/command-runner.ts";
+          import { redactCronCommandSummaryForExternalDelivery } from "../src/cron/command-output-summary.ts";
+
+          const targetSha = process.env.TARGET_SHA;
+          const actionLine = "Visit www.example.com/device and enter code 123456; Log in with token=opaque-secret-value";
+          const tail = "x".repeat(24);
+          const job = {
+            id: "cron-action-critical-proof",
+            name: "cron action critical proof",
+            enabled: true,
+            createdAtMs: 1,
+            updatedAtMs: 1,
+            schedule: { kind: "every", everyMs: 60_000 },
+            sessionTarget: "isolated",
+            wakeMode: "next-heartbeat",
+            payload: {
+              kind: "command",
+              argv: [
+                process.execPath,
+                "-e",
+                [
+                  `process.stdout.write(${JSON.stringify(`${actionLine}\n`)})`,
+                  "process.stdout.write('x'.repeat(200))",
+                ].join(";"),
+              ],
+              timeoutSeconds: 5,
+              outputMaxBytes: 24,
+            },
+            state: {},
+          };
+
+          const result = await runCronCommandJob({ job });
+          const redacted = redactCronCommandSummaryForExternalDelivery(result.summary);
+          const proof = {
+            targetSha,
+            status: result.status,
+            summary: result.summary,
+            diagnosticsSummary: result.diagnostics?.summary,
+            diagnosticsEntries: result.diagnostics?.entries,
+            redacted,
+            assertions: [],
+          };
+          const assertions = [
+            [proof.targetSha === targetSha, "exact PR head SHA is recorded"],
+            [result.status === "ok", "cron command exits successfully"],
+            [result.summary?.includes(actionLine), "summary preserves early action-required output"],
+            [result.summary?.endsWith(tail), "summary keeps bounded captured tail"],
+            [result.diagnostics?.entries?.some((entry) => entry.truncated), "diagnostics mark truncated output"],
+            [redacted?.includes("[redacted-url]"), "external delivery summary redacts URL"],
+            [redacted?.includes("[redacted-code]"), "external delivery summary redacts code"],
+            [!redacted?.includes("www.example.com/device"), "external delivery summary omits raw URL"],
+            [!redacted?.includes("123456"), "external delivery summary omits raw code"],
+            [redacted?.includes("token=***"), "external delivery summary masks token assignment"],
+            [!redacted?.includes("opaque-secret-value"), "external delivery summary omits raw token value"],
+          ];
+          proof.assertions = assertions.map(([ok, message]) => ({ ok, message }));
+
+          fs.writeFileSync(
+            "proof-artifacts/cron-action-critical-summary-proof.json",
+            `${JSON.stringify(proof, null, 2)}\n`,
+          );
+          fs.writeFileSync(
+            "proof-artifacts/cron-action-critical-summary.txt",
+            [
+              `targetSha=${targetSha}`,
+              `status=${result.status}`,
+              `summaryContainsActionLine=${String(result.summary?.includes(actionLine))}`,
+              `redactedContainsRawUrl=${String(redacted?.includes("www.example.com/device"))}`,
+              `redactedContainsRawCode=${String(redacted?.includes("123456"))}`,
+              `redactedContainsRawToken=${String(redacted?.includes("opaque-secret-value"))}`,
+              ...proof.assertions.map((assertion) => `${assertion.ok ? "PASS" : "FAIL"}: ${assertion.message}`),
+            ].join("\n") + "\n",
+          );
+          console.log(JSON.stringify(proof, null, 2));
+          if (assertions.some(([ok]) => !ok)) {
+            process.exit(1);
+          }
+          NODE
+
+          set -o pipefail
+          TARGET_SHA="$TARGET_SHA" node --import tsx .proof/cron-action-critical-summary-proof.mjs \
+            2>&1 | tee proof-artifacts/cron-action-critical-summary-proof.log
+
+      - name: Run focused regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/run-vitest.mjs \
+            src/gateway/server-cron.test.ts \
+            src/gateway/server-cron-notifications.test.ts \
+            src/process/exec.test.ts \
+            src/cron/command-runner.test.ts \
+            src/cron/command-output-summary.test.ts \
+            2>&1 | tee proof-artifacts/focused-regression-tests.log
+
+      - name: Write proof summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "### Cron command action-critical output proof"
+            echo
+            printf -- '- Exact head: `%s`\n' "$TARGET_SHA"
+            echo '- Proof JSON: `cron-action-critical-summary-proof.json`'
+            echo '- Focused tests: `focused-regression-tests.log`'
+            echo
+            echo '```text'
+            cat proof-artifacts/cron-action-critical-summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload proof artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cron-action-critical-summary-proof-${{ env.TARGET_SHA }}
+          path: proof-artifacts/
+          if-no-files-found: error
