@@ -1,0 +1,278 @@
+name: Context Engine Read-only Registration Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact PR head SHA to test
+        required: true
+        default: 0d7cf30c32d2cde431738ba3f46e3ae9640d8902
+  push:
+    branches:
+      - proof/context-engine-readonly-96357
+
+permissions:
+  contents: read
+
+jobs:
+  configured-plugin-proof:
+    name: Configured plugin context-engine proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      TARGET_SHA: ${{ github.event.inputs.target_sha || '0d7cf30c32d2cde431738ba3f46e3ae9640d8902' }}
+    steps:
+      - name: Checkout proof harness branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Checkout exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "TARGET_SHA must be a 40-character SHA: $TARGET_SHA" >&2
+            exit 1
+          fi
+          git checkout --detach "$TARGET_SHA"
+          resolved="$(git rev-parse HEAD)"
+          if [[ "$resolved" != "$TARGET_SHA" ]]; then
+            echo "Checked out $resolved, expected $TARGET_SHA" >&2
+            exit 1
+          fi
+          echo "Exact PR head: $resolved" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v6
+        with:
+          node-version: 24.x
+          package-manager-cache: false
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+
+      - name: Run configured context-engine proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proof-artifacts .proof
+          cat > .proof/context-engine-readonly-registration-proof.mjs <<'NODE'
+          import fs from "node:fs";
+          import os from "node:os";
+          import path from "node:path";
+
+          import {
+            clearContextEngineRuntimeQuarantine,
+            resolveContextEngine,
+          } from "../src/context-engine/registry.ts";
+          import { registerLegacyContextEngine } from "../src/context-engine/legacy.registration.ts";
+          import { loadOpenClawPlugins, clearPluginLoaderCache } from "../src/plugins/loader.ts";
+          import { resetPluginRuntimeStateForTest } from "../src/plugins/runtime.ts";
+
+          const targetSha = process.env.TARGET_SHA;
+          const root = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-context-engine-proof-"));
+          const pluginDir = path.join(root, "proof-context-engine");
+          const pluginFile = path.join(pluginDir, "proof-context-engine.cjs");
+          fs.mkdirSync(pluginDir, { recursive: true });
+          fs.writeFileSync(
+            path.join(pluginDir, "openclaw.plugin.json"),
+            JSON.stringify(
+              {
+                id: "proof-context-engine",
+                kind: ["context-engine"],
+                configSchema: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {},
+                },
+              },
+              null,
+              2,
+            ),
+          );
+          fs.writeFileSync(
+            pluginFile,
+            `module.exports = {
+            id: "proof-context-engine",
+            name: "Proof Context Engine",
+            register(api) {
+              const mode = api.registrationMode;
+              console.log("[proof-plugin] register mode=" + mode);
+              api.registerContextEngine("proof-context-engine", () => {
+                console.log("[proof-plugin] factory invoked mode=" + mode);
+                if (mode !== "full") {
+                  throw new Error("Engine initialization is disabled during read-only plugin registration");
+                }
+                return {
+                  info: { id: "proof-context-engine", name: "Proof Context Engine" },
+                  async ingest() { return { ingested: true }; },
+                  async assemble({ messages }) { return { messages, estimatedTokens: 0 }; },
+                  async compact() { return { ok: true, compacted: false }; }
+                };
+              });
+            }
+          };
+          `,
+          );
+
+          const config = {
+            plugins: {
+              enabled: true,
+              load: { paths: [pluginFile] },
+              allow: ["proof-context-engine"],
+              entries: { "proof-context-engine": { enabled: true } },
+              slots: { memory: "none", contextEngine: "proof-context-engine" },
+            },
+          };
+
+          const env = {
+            ...process.env,
+            OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+            OPENCLAW_STATE_DIR: path.join(root, "state"),
+          };
+
+          const proof = {
+            targetSha,
+            pluginDir,
+            pluginFile,
+            discovery: null,
+            runtime: null,
+            capturedWarnings: [],
+            capturedErrors: [],
+            assertions: [],
+          };
+
+          const originalWarn = console.warn;
+          const originalError = console.error;
+          console.warn = (...args) => {
+            proof.capturedWarnings.push(args.map(String).join(" "));
+            originalWarn(...args);
+          };
+          console.error = (...args) => {
+            proof.capturedErrors.push(args.map(String).join(" "));
+            originalError(...args);
+          };
+
+          const summarizeRegistry = (registry) => ({
+            plugins: registry.plugins.map((plugin) => ({
+              id: plugin.id,
+              status: plugin.status,
+              enabled: plugin.enabled,
+              error: plugin.error ?? null,
+              contextEngineIds: plugin.contextEngineIds ?? [],
+            })),
+            diagnostics: registry.diagnostics,
+          });
+
+          clearPluginLoaderCache();
+          resetPluginRuntimeStateForTest();
+          clearContextEngineRuntimeQuarantine();
+          registerLegacyContextEngine();
+
+          const discoveryRegistry = loadOpenClawPlugins({
+            config,
+            env,
+            workspaceDir: root,
+            activate: false,
+            cache: false,
+          });
+          const discoveryEngine = await resolveContextEngine(config);
+          proof.discovery = {
+            ...summarizeRegistry(discoveryRegistry),
+            resolvedEngineId: discoveryEngine.info.id,
+          };
+
+          const runtimeRegistry = loadOpenClawPlugins({
+            config,
+            env,
+            workspaceDir: root,
+            activate: true,
+            cache: false,
+          });
+          const runtimeEngine = await resolveContextEngine(config);
+          proof.runtime = {
+            ...summarizeRegistry(runtimeRegistry),
+            resolvedEngineId: runtimeEngine.info.id,
+          };
+
+          const serialized = JSON.stringify(proof, null, 2);
+          const assertions = [
+            [proof.targetSha === process.env.TARGET_SHA, "exact PR head SHA is recorded"],
+            [
+              proof.discovery.resolvedEngineId === "legacy",
+              "read-only discovery registration falls back to legacy",
+            ],
+            [
+              proof.capturedWarnings.some((line) => line.includes("registered for read-only discovery only")),
+              "discovery-only registration emits non-quarantine fallback warning",
+            ],
+            [
+              !serialized.includes("failed during factory") && !serialized.includes("quarantining"),
+              "discovery path does not invoke or quarantine the read-only factory",
+            ],
+            [
+              proof.runtime.resolvedEngineId === "proof-context-engine",
+              "runtime/full activation resolves the configured plugin context engine",
+            ],
+            [
+              proof.runtime.plugins.some(
+                (plugin) =>
+                  plugin.id === "proof-context-engine" &&
+                  plugin.status === "loaded" &&
+                  plugin.contextEngineIds.includes("proof-context-engine"),
+              ),
+              "runtime plugin registry records the context-engine registration",
+            ],
+          ];
+          proof.assertions = assertions.map(([ok, message]) => ({ ok, message }));
+
+          fs.writeFileSync(
+            "proof-artifacts/context-engine-readonly-registration-proof.json",
+            `${JSON.stringify(proof, null, 2)}\n`,
+          );
+          fs.writeFileSync(
+            "proof-artifacts/context-engine-readonly-registration-summary.txt",
+            [
+              `targetSha=${targetSha}`,
+              `discoveryResolvedEngine=${proof.discovery.resolvedEngineId}`,
+              `runtimeResolvedEngine=${proof.runtime.resolvedEngineId}`,
+              `warningCount=${proof.capturedWarnings.length}`,
+              `errorCount=${proof.capturedErrors.length}`,
+              ...proof.assertions.map((assertion) => `${assertion.ok ? "PASS" : "FAIL"}: ${assertion.message}`),
+            ].join("\n") + "\n",
+          );
+          console.log(JSON.stringify(proof, null, 2));
+          if (assertions.some(([ok]) => !ok)) {
+            process.exit(1);
+          }
+          NODE
+
+          set -o pipefail
+          TARGET_SHA="$TARGET_SHA" node --import tsx .proof/context-engine-readonly-registration-proof.mjs \
+            2>&1 | tee proof-artifacts/context-engine-readonly-registration.log
+
+          {
+            echo "### Configured plugin context-engine proof"
+            echo
+            printf -- '- Exact head: `%s`\n' "$TARGET_SHA"
+            echo '- Proof JSON: `context-engine-readonly-registration-proof.json`'
+            echo '- Proof log: `context-engine-readonly-registration.log`'
+            echo
+            echo '```text'
+            cat proof-artifacts/context-engine-readonly-registration-summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload proof artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: context-engine-readonly-registration-proof-${{ env.TARGET_SHA }}
+          path: proof-artifacts/
+          if-no-files-found: error
