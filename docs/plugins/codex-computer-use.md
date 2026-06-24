@@ -14,7 +14,11 @@ does not vendor the desktop app, execute desktop actions itself, or bypass
 Codex permissions. The bundled `codex` plugin only prepares Codex app-server:
 it enables Codex plugin support, finds or installs the configured Codex
 Computer Use plugin, checks that the `computer-use` MCP server is available, and
-then lets Codex own the native MCP tool calls during Codex-mode turns.
+then lets Codex own the native MCP tool calls during Codex-mode turns. When
+Codex asks OpenClaw to bridge a Computer Use approval form with no fields,
+OpenClaw returns an explicit `{ "approve": true }` confirmation rather than a
+contentless accept, so the downstream MCP helper receives a machine-readable
+approval result.
 
 Use this page when OpenClaw is already using the native Codex harness. For the
 runtime setup itself, see [Codex harness](/plugins/codex-harness).

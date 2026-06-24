@@ -298,7 +298,7 @@ describe("Codex app-server elicitation bridge", () => {
 
     expect(result).toEqual({
       action: "accept",
-      content: null,
+      content: { approve: true },
       _meta: null,
     });
     const approvalRequestCall = gatewayToolCall();
@@ -329,13 +329,32 @@ describe("Codex app-server elicitation bridge", () => {
 
     expect(result).toEqual({
       action: "accept",
-      content: null,
+      content: { approve: true },
       _meta: null,
     });
     expect(mockCallGatewayTool.mock.calls.map(([method]) => method)).toEqual([
       "plugin.approval.request",
       "plugin.approval.waitDecision",
     ]);
+  });
+
+  it("does not return a contentless accept for empty Computer Use schemas", async () => {
+    mockCallGatewayTool
+      .mockResolvedValueOnce({ id: "plugin:approval-computer-use-empty", status: "accepted" })
+      .mockResolvedValueOnce({ id: "plugin:approval-computer-use-empty", decision: "allow-once" });
+
+    const result = await handleCodexAppServerElicitationRequest({
+      requestParams: buildComputerUseApprovalElicitation({
+        requestedSchema: { type: "object", properties: {} },
+      }),
+      paramsForRun: createParams(),
+      threadId: "thread-1",
+      turnId: "turn-1",
+      pluginAppPolicyContext: createPluginAppPolicyContext({ apps: [] }),
+      computerUseMcpServerName: "computer-use",
+    });
+
+    expect(result).toEqual({ action: "accept", content: { approve: true }, _meta: null });
   });
 
   it("maps Computer Use allow-always decisions onto persistent metadata", async () => {
@@ -357,7 +376,7 @@ describe("Codex app-server elicitation bridge", () => {
 
     expect(result).toEqual({
       action: "accept",
-      content: null,
+      content: { approve: true },
       _meta: {
         persist: "always",
       },
@@ -397,7 +416,7 @@ describe("Codex app-server elicitation bridge", () => {
 
     expect(result).toEqual({
       action: "accept",
-      content: null,
+      content: { approve: true },
       _meta: null,
     });
     const approvalRequest = gatewayToolArg(0, 2) as { description: string };
@@ -465,7 +484,7 @@ describe("Codex app-server elicitation bridge", () => {
 
     expect(result).toEqual({
       action: "accept",
-      content: null,
+      content: { approve: true },
       _meta: null,
     });
   });
@@ -506,7 +525,7 @@ describe("Codex app-server elicitation bridge", () => {
 
     expect(result).toEqual({
       action: "accept",
-      content: null,
+      content: { approve: true },
       _meta: null,
     });
     const approvalRequest = gatewayToolArg(0, 2) as {
