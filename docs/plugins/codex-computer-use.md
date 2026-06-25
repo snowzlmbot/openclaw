@@ -16,9 +16,9 @@ it enables Codex plugin support, finds or installs the configured Codex
 Computer Use plugin, checks that the `computer-use` MCP server is available, and
 then lets Codex own the native MCP tool calls during Codex-mode turns. When
 Codex asks OpenClaw to bridge a Computer Use approval form with no fields,
-OpenClaw returns an explicit `{ "approve": true }` confirmation rather than a
-contentless accept, so the downstream MCP helper receives a machine-readable
-approval result.
+OpenClaw returns an explicit `{ "approve": true }` confirmation for that
+Computer Use approval instead of changing every empty-schema MCP approval shape.
+Codex still owns the later native `tools/call` execution path.
 
 Use this page when OpenClaw is already using the native Codex harness. For the
 runtime setup itself, see [Codex harness](/plugins/codex-harness).

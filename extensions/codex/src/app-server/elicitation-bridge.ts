@@ -31,6 +31,7 @@ type BridgeableApprovalElicitation = {
   meta: JsonObject;
   persistHintsMode?: "legacy" | "explicit";
   allowedDecisions?: ExecApprovalDecision[];
+  emptySchemaAcceptContent?: JsonObject;
 };
 
 type PluginElicitationResolution =
@@ -486,6 +487,7 @@ function readComputerUseApprovalElicitation(
     }),
     requestedSchema,
     meta,
+    emptySchemaAcceptContent: EMPTY_SCHEMA_APPROVAL_CONTENT,
   };
 }
 
@@ -681,7 +683,7 @@ async function requestPluginApprovalOutcome(params: {
 function buildElicitationResponse(
   approvalPrompt: Pick<
     BridgeableApprovalElicitation,
-    "requestedSchema" | "meta" | "persistHintsMode"
+    "requestedSchema" | "meta" | "persistHintsMode" | "emptySchemaAcceptContent"
   >,
   outcome: AppServerApprovalOutcome,
 ): JsonValue {
@@ -698,7 +700,7 @@ function buildElicitationResponse(
     if (hasNoSchemaProperties(requestedSchema)) {
       return {
         action: "accept",
-        content: EMPTY_SCHEMA_APPROVAL_CONTENT,
+        content: approvalPrompt.emptySchemaAcceptContent ?? null,
         _meta: buildAcceptedMeta(meta, outcome, approvalPrompt.persistHintsMode ?? "legacy"),
       };
     }

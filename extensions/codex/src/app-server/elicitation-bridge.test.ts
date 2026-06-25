@@ -284,7 +284,7 @@ describe("Codex app-server elicitation bridge", () => {
     ]);
   });
 
-  it("accepts current Codex MCP approval elicitations with an empty form schema", async () => {
+  it("preserves contentless accepts for non-Computer Use empty-form approvals", async () => {
     mockCallGatewayTool
       .mockResolvedValueOnce({ id: "plugin:approval-current", status: "accepted" })
       .mockResolvedValueOnce({ id: "plugin:approval-current", decision: "allow-once" });
@@ -298,7 +298,7 @@ describe("Codex app-server elicitation bridge", () => {
 
     expect(result).toEqual({
       action: "accept",
-      content: { approve: true },
+      content: null,
       _meta: null,
     });
     const approvalRequestCall = gatewayToolCall();
