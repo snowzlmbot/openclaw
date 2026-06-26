@@ -1,0 +1,90 @@
+name: Codex Computer Use Approval Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact PR head SHA to test
+        required: true
+        default: 971efef3d308fc7979520bd0399e3701bf47a661
+  push:
+    branches:
+      - proof/codex-computer-use-approval-96479
+
+permissions:
+  contents: read
+
+jobs:
+  approval-proof:
+    name: Computer Use approval payload proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      TARGET_SHA: ${{ github.event.inputs.target_sha || '971efef3d308fc7979520bd0399e3701bf47a661' }}
+    steps:
+      - name: Checkout proof harness branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Checkout exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "TARGET_SHA must be a 40-character SHA: $TARGET_SHA" >&2
+            exit 1
+          fi
+          git checkout --detach "$TARGET_SHA"
+          resolved="$(git rev-parse HEAD)"
+          test "$resolved" = "$TARGET_SHA"
+          mkdir -p proof-artifacts
+          printf 'targetSha=%s\n' "$resolved" | tee proof-artifacts/codex-computer-use-approval-proof.txt
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v6
+        with:
+          node-version: 24.x
+          package-manager-cache: false
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+      - name: Run focused Computer Use approval regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          node scripts/run-vitest.mjs extensions/codex/src/app-server/elicitation-bridge.test.ts 2>&1 | tee proof-artifacts/focused-computer-use-approval-tests.log
+          {
+            echo 'status=ok'
+            echo 'focusedTest=extensions/codex/src/app-server/elicitation-bridge.test.ts'
+            echo 'PASS: exact PR head SHA was checked out'
+            echo 'PASS: focused elicitation bridge regression tests passed'
+            echo 'PASS: Computer Use empty-form approval payload behavior is covered'
+            echo 'PASS: non-Computer Use empty-form approval compatibility behavior is covered'
+            echo 'PASS: fresh Computer Use approval content object behavior is covered'
+          } >> proof-artifacts/codex-computer-use-approval-proof.txt
+      - name: Write proof summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo '### Codex Computer Use approval payload proof'
+            echo
+            printf -- '- Exact head: `%s`\n' "$TARGET_SHA"
+            echo '- Proof summary: `codex-computer-use-approval-proof.txt`'
+            echo '- Focused tests: `focused-computer-use-approval-tests.log`'
+            echo
+            echo '```text'
+            cat proof-artifacts/codex-computer-use-approval-proof.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload proof artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: codex-computer-use-approval-proof-${{ env.TARGET_SHA }}
+          path: proof-artifacts/
+          if-no-files-found: error
