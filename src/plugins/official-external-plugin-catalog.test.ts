@@ -66,11 +66,12 @@ describe("official external plugin catalog", () => {
         minHostVersion: ">=2026.6.8",
       });
     }
+    const clawHubFirstUntilNpmArtifactsPublish = new Set(["searxng", "tavily"]);
     for (const [id, npmSpec] of newlyExternalized) {
       expect(resolveOfficialExternalPluginInstall(expectCatalogEntry(id))).toMatchObject({
         clawhubSpec: `clawhub:${npmSpec}`,
         npmSpec,
-        defaultChoice: "npm",
+        defaultChoice: clawHubFirstUntilNpmArtifactsPublish.has(id) ? "clawhub" : "npm",
         minHostVersion: ">=2026.6.9",
       });
     }

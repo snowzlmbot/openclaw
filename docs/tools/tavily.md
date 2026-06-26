@@ -19,6 +19,7 @@ Tavily returns structured results optimized for LLM consumption with configurabl
 | --------- | ----------------------------------- |
 | Plugin id | `tavily`                            |
 | Package   | `@openclaw/tavily-plugin`           |
+| Install   | `clawhub:@openclaw/tavily-plugin`   |
 | Auth      | `TAVILY_API_KEY` or config `apiKey` |
 | Base URL  | `https://api.tavily.com` (default)  |
 | Tools     | `tavily_search`, `tavily_extract`   |
@@ -28,7 +29,7 @@ Tavily returns structured results optimized for LLM consumption with configurabl
 <Steps>
   <Step title="Install the plugin">
     ```bash
-    openclaw plugins install @openclaw/tavily-plugin
+    openclaw plugins install clawhub:@openclaw/tavily-plugin
     ```
   </Step>
   <Step title="Get an API key">

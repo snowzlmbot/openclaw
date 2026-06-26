@@ -13,7 +13,7 @@
     "install": {
       "clawhubSpec": "clawhub:@openclaw/searxng-plugin",
       "npmSpec": "@openclaw/searxng-plugin",
-      "defaultChoice": "npm",
+      "defaultChoice": "clawhub",
       "minHostVersion": ">=2026.6.9",
       "allowInvalidConfigRecovery": true
     },

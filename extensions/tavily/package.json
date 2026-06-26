@@ -16,7 +16,7 @@
     "install": {
       "clawhubSpec": "clawhub:@openclaw/tavily-plugin",
       "npmSpec": "@openclaw/tavily-plugin",
-      "defaultChoice": "npm",
+      "defaultChoice": "clawhub",
       "minHostVersion": ">=2026.6.9",
       "allowInvalidConfigRecovery": true
     },
