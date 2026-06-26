@@ -75,6 +75,39 @@ describe("ChatLog", () => {
     expect(chatLog.children.length).toBe(1);
   });
 
+  it("suppresses an adjacent history replay/live final duplicate", () => {
+    const chatLog = new ChatLog(40);
+
+    chatLog.finalizeAssistant("done");
+    chatLog.finalizeAssistant("done", "run-live");
+
+    expect(chatLog.children.length).toBe(1);
+    expect(chatLog.render(120).join("\n")).toContain("done");
+  });
+
+  it("allows duplicate assistant text when a user row separates replay and live final", () => {
+    const chatLog = new ChatLog(40);
+
+    chatLog.finalizeAssistant("done");
+    chatLog.addUser("next prompt");
+    chatLog.finalizeAssistant("done", "run-live");
+
+    const rendered = chatLog.render(120).join("\n");
+    expect(chatLog.children.length).toBe(3);
+    expect(rendered).toContain("next prompt");
+    expect(rendered.match(/done/g)?.length).toBe(2);
+  });
+
+  it("allows duplicate live finals that did not come from history replay", () => {
+    const chatLog = new ChatLog(40);
+
+    chatLog.finalizeAssistant("done", "run-one");
+    chatLog.finalizeAssistant("done", "run-two");
+
+    expect(chatLog.children.length).toBe(2);
+    expect(chatLog.render(120).join("\n").match(/done/g)?.length).toBe(2);
+  });
+
   it("reserves assistant position without clearing existing streamed text", () => {
     const chatLog = new ChatLog(40);
     chatLog.startAssistant("partial", "run-active");

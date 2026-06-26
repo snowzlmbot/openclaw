@@ -9,6 +9,9 @@ import { UserMessageComponent } from "./user-message.js";
 
 // Tolerates history timestamps slightly before locally pending messages.
 const PENDING_HISTORY_CLOCK_SKEW_TOLERANCE_MS = 60_000;
+// History replay does not carry run ids; suppress an immediately following
+// live final only when it exactly matches the adjacent replayed assistant row.
+const HISTORY_REPLAY_LIVE_FINAL_DEDUP_MS = 5_000;
 
 type RepeatableSystemMessage = {
   component: Container;
@@ -34,6 +37,11 @@ export class ChatLog extends Container {
   private btwMessage: BtwInlineMessage | null = null;
   private toolsExpanded = false;
   private repeatableSystemMessage: RepeatableSystemMessage | null = null;
+  private lastHistoryAssistant: {
+    component: AssistantMessageComponent;
+    text: string;
+    createdAt: number;
+  } | null = null;
 
   constructor(maxComponents = 180) {
     super();
@@ -68,6 +76,9 @@ export class ChatLog extends Container {
     if (this.repeatableSystemMessage?.component === component) {
       this.repeatableSystemMessage = null;
     }
+    if (this.lastHistoryAssistant?.component === component) {
+      this.lastHistoryAssistant = null;
+    }
   }
 
   private pruneOverflow() {
@@ -88,6 +99,7 @@ export class ChatLog extends Container {
 
   private appendNonSystem(component: Component) {
     this.repeatableSystemMessage = null;
+    this.lastHistoryAssistant = null;
     this.append(component);
   }
 
@@ -98,6 +110,7 @@ export class ChatLog extends Container {
     this.pendingSystemNotices.clear();
     this.btwMessage = null;
     this.repeatableSystemMessage = null;
+    this.lastHistoryAssistant = null;
     if (!opts?.preservePendingUsers) {
       this.pendingUsers.clear();
     }
@@ -156,6 +169,7 @@ export class ChatLog extends Container {
       return;
     }
     const message = this.createSystemMessage(text);
+    this.lastHistoryAssistant = null;
     this.append(message.component);
     this.repeatableSystemMessage = opts?.coalesceConsecutive ? message : null;
   }
@@ -167,6 +181,7 @@ export class ChatLog extends Container {
     }
     const message = this.createSystemMessage(text);
     this.pendingSystemNotices.set(runId, message.component);
+    this.lastHistoryAssistant = null;
     this.append(message.component);
   }
 
@@ -308,9 +323,23 @@ export class ChatLog extends Container {
     if (existing) {
       existing.setText(text);
       this.streamingRuns.delete(effectiveRunId);
+      this.lastHistoryAssistant = null;
       return;
     }
-    this.appendNonSystem(new AssistantMessageComponent(text));
+    const now = Date.now();
+    if (
+      runId &&
+      this.lastHistoryAssistant &&
+      this.children[this.children.length - 1] === this.lastHistoryAssistant.component &&
+      this.lastHistoryAssistant.text === text &&
+      now - this.lastHistoryAssistant.createdAt <= HISTORY_REPLAY_LIVE_FINAL_DEDUP_MS
+    ) {
+      this.lastHistoryAssistant = null;
+      return;
+    }
+    const component = new AssistantMessageComponent(text);
+    this.appendNonSystem(component);
+    this.lastHistoryAssistant = runId ? null : { component, text, createdAt: now };
   }
 
   dropAssistant(runId?: string) {
