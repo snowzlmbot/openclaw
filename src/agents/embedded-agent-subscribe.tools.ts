@@ -267,17 +267,57 @@ export function sanitizeToolResult(result: unknown): unknown {
   return out;
 }
 
+function stringifyStructuredToolResultContent(block: unknown): string | undefined {
+  if (!block || typeof block !== "object") {
+    return undefined;
+  }
+  const record = block as Record<string, unknown>;
+  const type = readStringValue(record.type);
+  if (type === "text" || type === "image") {
+    return undefined;
+  }
+  const seen = new WeakSet<object>();
+  try {
+    const serialized = JSON.stringify(record, (_key, value) => {
+      if (typeof value === "string") {
+        return value.replace(
+          /data:[^"'\\\s]+/gi,
+          (match) => `[inline data URI: ${match.length} chars]`,
+        );
+      }
+      if (!value || typeof value !== "object") {
+        return value;
+      }
+      if (seen.has(value)) {
+        return "[Circular]";
+      }
+      seen.add(value);
+      return value;
+    });
+    return serialized && serialized !== "{}" ? serialized : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function extractToolResultText(result: unknown): string | undefined {
   if (!result || typeof result !== "object") {
     return undefined;
   }
   const record = result as Record<string, unknown>;
-  const texts = collectTextContentBlocks(record.content)
+  const content = Array.isArray(record.content) ? record.content : [];
+  const texts = collectTextContentBlocks(content)
     .map((item) => {
       const trimmed = item.trim();
       return trimmed ? trimmed : undefined;
     })
     .filter((value): value is string => Boolean(value));
+  for (const item of content) {
+    const structured = stringifyStructuredToolResultContent(item);
+    if (structured) {
+      texts.push(structured);
+    }
+  }
   if (texts.length === 0) {
     return undefined;
   }
