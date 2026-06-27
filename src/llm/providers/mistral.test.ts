@@ -247,7 +247,7 @@ describe("Mistral provider", () => {
   });
 
   it("serializes structured non-image blocks in tool results as JSON text", async () => {
-    const context = {
+    const testContext = {
       messages: [
         {
           role: "user",
@@ -281,9 +281,9 @@ describe("Mistral provider", () => {
           timestamp: 0,
         },
       ],
-    } satisfies Context;
+    } as unknown as Context;
 
-    const stream = streamMistral(makeMistralModel(), context, {
+    const stream = streamMistral(makeMistralModel(), testContext, {
       apiKey: "sk-mistral-provider",
     });
     await stream.result();
@@ -300,7 +300,7 @@ describe("Mistral provider", () => {
   });
 
   it("serializes structured-only tool results instead of empty fallback", async () => {
-    const context = {
+    const testContext = {
       messages: [
         {
           role: "user",
@@ -332,9 +332,9 @@ describe("Mistral provider", () => {
           timestamp: 0,
         },
       ],
-    } satisfies Context;
+    } as unknown as Context;
 
-    const stream = streamMistral(makeMistralModel(), context, {
+    const stream = streamMistral(makeMistralModel(), testContext, {
       apiKey: "sk-mistral-provider",
     });
     await stream.result();
