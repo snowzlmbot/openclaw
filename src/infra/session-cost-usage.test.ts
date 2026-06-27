@@ -310,6 +310,7 @@ describe("session cost usage", () => {
       timestamp: new Date().toISOString(),
       message: {
         role: "assistant",
+        content: "charged DeepSeek answer",
         provider: "deepseek",
         model: "deepseek-v4-flash",
         usage: {
@@ -445,7 +446,13 @@ describe("session cost usage", () => {
 
     clearGatewayModelPricingCacheState();
     await withStateDir(root, async () => {
-      const summary = await loadCostUsageSummaryFromCache({ days: 30, config, agentId: "main" });
+      const summary = await loadCostUsageSummaryFromCache({
+        startMs: Date.UTC(2026, 0, 1),
+        endMs: Date.now() + 1,
+        config,
+        agentId: "main",
+        refreshMode: "sync-when-empty",
+      });
       expect(summary.totals.totalTokens).toBe(30_000);
       expect(summary.totals.totalCost).toBeCloseTo(0.00448, 8);
       expect(summary.totals.missingCostEntries).toBe(0);
