@@ -1,0 +1,47 @@
+name: Provider replay proof
+
+on:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: read
+
+jobs:
+  provider-replay-proof:
+    name: Provider replay proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-node-env
+        with:
+          install-bun: "false"
+
+      - name: Run provider replay proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proof-output
+          {
+            echo "Provider replay proof"
+            echo "ref: ${GITHUB_REF_NAME}"
+            echo "sha: ${GITHUB_SHA}"
+            echo "command: pnpm exec tsx scripts/proofs/provider-tool-result-replay-proof.ts"
+            echo
+            pnpm exec tsx scripts/proofs/provider-tool-result-replay-proof.ts
+          } | tee proof-output/provider-tool-result-replay-proof.txt
+
+      - name: Upload provider replay proof artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: provider-tool-result-replay-proof
+          path: proof-output/provider-tool-result-replay-proof.txt
+          if-no-files-found: error
+          retention-days: 14
