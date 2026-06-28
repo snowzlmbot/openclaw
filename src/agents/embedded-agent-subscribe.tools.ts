@@ -34,6 +34,7 @@ export { isToolResultError };
 const TOOL_RESULT_MAX_CHARS = 8000;
 const TOOL_ERROR_MAX_CHARS = 400;
 const TOOL_DENIAL_ERROR_CODES = ["SYSTEM_RUN_DENIED", "INVALID_REQUEST"] as const;
+const OPAQUE_STRUCTURED_RESULT_FIELDS = new Set(["encrypted_content", "encrypted_stdout"]);
 
 function truncateToolText(text: string): string {
   if (text.length <= TOOL_RESULT_MAX_CHARS) {
@@ -300,6 +301,10 @@ function stringifyStructuredToolResultContent(block: unknown): string | undefine
         ) {
           return `[binary omitted: ${value.length} chars]`;
         }
+        // Claude CLI result blocks carry replay-only ciphertext that is not useful display text.
+        if (OPAQUE_STRUCTURED_RESULT_FIELDS.has(key)) {
+          return `[opaque data omitted: ${value.length} chars]`;
+        }
         return truncateToolText(redactInlineDataUriValue(redactSensitiveFieldValue(key, value)));
       }
       if (typeof value === "bigint") {
@@ -314,7 +319,8 @@ function stringifyStructuredToolResultContent(block: unknown): string | undefine
       seen.add(value);
       return value;
     });
-    return serialized && serialized !== "{}" ? serialized : undefined;
+    const redacted = serialized ? redactToolPayloadText(serialized) : serialized;
+    return redacted && redacted !== "{}" ? redacted : undefined;
   } catch {
     return undefined;
   }

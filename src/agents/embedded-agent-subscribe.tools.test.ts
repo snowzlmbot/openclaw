@@ -484,6 +484,29 @@ describe("extractToolResultText", () => {
     expect(text).not.toContain("sk-structured-secret-1234567890");
   });
 
+  it("redacts structured headers and omits opaque CLI payloads before the output cap", () => {
+    const text = extractToolResultText([
+      {
+        type: "web_search_result",
+        encrypted_content: "opaque-search-ciphertext".repeat(500),
+        encrypted_stdout: "opaque-command-ciphertext".repeat(500),
+        headers: {
+          cookie: "session=structured-cookie-secret",
+          "set-cookie": "sid=structured-set-cookie-secret; HttpOnly",
+        },
+        title: "Useful result",
+      },
+    ]);
+
+    expect(text).toContain('"encrypted_content":"[opaque data omitted:');
+    expect(text).toContain('"encrypted_stdout":"[opaque data omitted:');
+    expect(text).toContain('"title":"Useful result"');
+    expect(text).not.toContain("opaque-search-ciphertext");
+    expect(text).not.toContain("opaque-command-ciphertext");
+    expect(text).not.toContain("structured-cookie-secret");
+    expect(text).not.toContain("structured-set-cookie-secret");
+  });
+
   it("caps structured fallback output", () => {
     const text = extractToolResultText({
       content: [{ type: "json", data: "x".repeat(9000) }],
