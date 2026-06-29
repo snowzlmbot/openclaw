@@ -2572,7 +2572,6 @@ describe("anthropic transport stream", () => {
             role: "toolResult",
             toolCallId: "tool_1",
             content: [
-              { type: "text", text: "ok" },
               {
                 type: "resource",
                 resource: {
@@ -2602,7 +2601,7 @@ describe("anthropic transport stream", () => {
     // No images → returns sanitized text string, not array
     expect(typeof toolResult.content).toBe("string");
     expect(toolResult.content).toContain('"type":"resource"');
-    expect(toolResult.content).toContain("ok");
+    expect(toolResult.content).toContain('{\\"key\\":\\"value\\"}');
     expect(toolResult.is_error).toBe(false);
   });
 

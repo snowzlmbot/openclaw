@@ -267,7 +267,6 @@ describe("Mistral provider", () => {
           role: "toolResult",
           toolCallId: "tool_1",
           content: [
-            { type: "text", text: "ok" },
             {
               type: "resource",
               resource: {
@@ -296,7 +295,7 @@ describe("Mistral provider", () => {
     const toolContent = Array.isArray(toolMessage!.content) ? toolMessage!.content : [];
     const textBlock = toolContent.find((block) => block.type === "text");
     expect(textBlock?.text).toEqual(expect.stringContaining('{"type":"resource"'));
-    expect(textBlock?.text).toContain("ok");
+    expect(textBlock?.text).toContain('{\\"key\\":\\"value\\"}');
   });
 
   it("serializes structured-only tool results instead of empty fallback", async () => {

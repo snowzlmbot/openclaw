@@ -1,5 +1,5 @@
-// Tool-result text extraction keeps provider conversion lossless; established
-// context/tool-result guards own payload budgeting and truncation later.
+// Tool-result text extraction keeps provider replay text-first and bounded before
+// structured fallback content can cross external model-provider boundaries.
 import { describe, expect, it } from "vitest";
 import { extractToolResultText } from "./tool-result-text.js";
 
@@ -90,19 +90,29 @@ describe("extractToolResultText", () => {
     expect(text).not.toContain("ciphertext");
   });
 
-  it("does not truncate structured blocks at the provider helper boundary", () => {
+  it("uses structured replay only as a no-text fallback", () => {
+    const text = extractToolResultText([
+      { type: "text", text: "curated summary" },
+      { type: "json", internal: "extra structured detail" },
+    ]);
+
+    expect(text).toBe("curated summary");
+    expect(text).not.toContain("extra structured detail");
+  });
+
+  it("truncates structured fallback text before provider replay", () => {
     const tail = "tail-marker";
     const text = extractToolResultText([
       {
         type: "json",
         data: {
-          payload: `${"x".repeat(1_200)}${tail}`,
+          payload: `${"x".repeat(8_200)}${tail}`,
         },
       },
     ]);
 
-    expect(text.length).toBeGreaterThan(1_200);
-    expect(text).toContain(tail);
-    expect(text).not.toContain("... (");
+    expect(text.length).toBeLessThan(8_100);
+    expect(text).toContain("…(truncated)…");
+    expect(text).not.toContain(tail);
   });
 });

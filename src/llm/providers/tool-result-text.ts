@@ -1,6 +1,8 @@
 import { redactSecrets } from "../../logging/redact.js";
+import { truncateUtf16Safe } from "../../shared/utf16-slice.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 
+const PROVIDER_TOOL_RESULT_MAX_CHARS = 8000;
 const MEDIA_ONLY_TOOL_RESULT_TYPES = new Set(["audio", "image", "image_url", "input_image"]);
 const INLINE_DATA_URI_PATTERN =
   /(^|[^A-Za-z0-9_])data:([a-z][a-z0-9.+-]*\/[a-z0-9.+-]+(?:;[a-z0-9.+-]+=[^,;"'\s]+|;base64)*,[^\s"'<>)]+)/gi;
@@ -88,16 +90,22 @@ function stringifyStructuredBlock(block: Record<string, unknown>): string | unde
     if (!serialized || serialized === "{}") {
       return undefined;
     }
-    // Keep provider conversion untruncated here; structured redaction above masks secrets before
-    // this text can cross an external model-provider boundary.
     return serialized;
   } catch {
     return undefined;
   }
 }
 
+function truncateProviderToolText(text: string): string {
+  if (text.length <= PROVIDER_TOOL_RESULT_MAX_CHARS) {
+    return text;
+  }
+  return `${truncateUtf16Safe(text, PROVIDER_TOOL_RESULT_MAX_CHARS)}\n…(truncated)…`;
+}
+
 export function extractToolResultText(blocks: readonly unknown[]): string {
-  const parts: string[] = [];
+  const explicitTexts: string[] = [];
+  const structuredTexts: string[] = [];
   for (const block of blocks) {
     if (!block || typeof block !== "object") {
       continue;
@@ -109,14 +117,15 @@ export function extractToolResultText(blocks: readonly unknown[]): string {
     if (record.type === "text") {
       const text = typeof record.text === "string" ? record.text : "";
       if (text) {
-        parts.push(text);
+        explicitTexts.push(text);
       }
       continue;
     }
     const structured = stringifyStructuredBlock(record);
     if (structured) {
-      parts.push(structured);
+      structuredTexts.push(structured);
     }
   }
-  return sanitizeSurrogates(parts.join("\n"));
+  const parts = explicitTexts.length > 0 ? explicitTexts : structuredTexts;
+  return sanitizeSurrogates(truncateProviderToolText(parts.join("\n")));
 }
