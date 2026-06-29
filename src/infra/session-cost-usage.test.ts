@@ -358,6 +358,64 @@ describe("session cost usage", () => {
     });
   });
 
+  it("keeps zero-token recorded zero costs at zero even when pricing is known", async () => {
+    const root = await makeSessionCostRoot("cost-known-pricing-zero-token");
+    const sessionsDir = path.join(root, "agents", "main", "sessions");
+    await fs.mkdir(sessionsDir, { recursive: true });
+
+    const entry = {
+      type: "message",
+      timestamp: new Date().toISOString(),
+      message: {
+        role: "assistant",
+        content: "empty DeepSeek accounting row",
+        provider: "deepseek",
+        model: "deepseek-v4-flash",
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+      },
+    };
+
+    await fs.writeFile(
+      path.join(sessionsDir, "sess-zero-tokens.jsonl"),
+      transcriptText("sess-zero-tokens", entry),
+      "utf-8",
+    );
+
+    const config = {
+      models: {
+        providers: {
+          deepseek: {
+            models: [
+              {
+                id: "deepseek-v4-flash",
+                cost: { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0 },
+              },
+            ],
+          },
+        },
+      },
+    } as unknown as OpenClawConfig;
+
+    clearGatewayModelPricingCacheState();
+    await withStateDir(root, async () => {
+      const summary = await loadCostUsageSummary({ days: 30, config });
+      expect(summary.totals.totalTokens).toBe(0);
+      expect(summary.totals.totalCost).toBe(0);
+      expect(summary.totals.missingCostEntries).toBe(0);
+
+      const logs = await loadSessionLogs({ sessionId: "sess-zero-tokens", config });
+      expect(logs?.[0]?.tokens).toBe(0);
+      expect(logs?.[0]?.cost).toBe(0);
+    });
+  });
+
   it("invalidates version-4 cache entries that preserved known-priced zero costs", async () => {
     const root = await makeSessionCostRoot("cost-known-pricing-zero-cache-upgrade");
     const sessionsDir = path.join(root, "agents", "main", "sessions");
