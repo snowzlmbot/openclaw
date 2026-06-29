@@ -1173,4 +1173,201 @@ describe("openai-completions stop-reason tool-call guard", () => {
     expect(result.stopReason).toBe("stop");
     expect(result.content.filter((b) => b.type === "toolCall")).toStrictEqual([]);
   });
+
+  it("serializes structured tool results as tool text", async () => {
+    let capturedPayload: Record<string, unknown> | undefined;
+    const stream = streamOpenAICompletions(
+      model,
+      {
+        messages: [
+          {
+            role: "toolResult",
+            toolCallId: "call_1",
+            toolName: "session_status",
+            content: [{ type: "json", payload: { sessionKey: "current", status: "ok" } }],
+            isError: false,
+            timestamp: 0,
+          },
+        ],
+      } as unknown as Context,
+      {
+        apiKey: "sk-test",
+        onPayload(payload) {
+          capturedPayload = payload as Record<string, unknown>;
+          throw new Error("stop before network");
+        },
+      },
+    );
+
+    const result = await stream.result();
+
+    expect(result.stopReason).toBe("error");
+    expect(capturedPayload?.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "tool",
+          tool_call_id: "call_1",
+          content: expect.stringContaining('"type":"json"'),
+        }),
+      ]),
+    );
+  });
+
+  it("redacts sensitive fields, omits binary data, and handles opaque payloads in tool results", async () => {
+    let capturedPayload: Record<string, unknown> | undefined;
+    const circularRef: Record<string, unknown> = { type: "resource", name: "loop" };
+    circularRef.self = circularRef;
+
+    const stream = streamOpenAICompletions(
+      model,
+      {
+        messages: [
+          {
+            role: "toolResult",
+            toolCallId: "call_sensitive",
+            toolName: "inspect",
+            content: [
+              {
+                type: "resource",
+                headers: {
+                  authorization: "Bearer sk-live-secret-token",
+                  "x-api-key": "sk-ant-key-12345",
+                },
+                credentials: {
+                  token: "ghp_personal_access_token",
+                  password: "super-secret-pw",
+                },
+                binary: {
+                  mimeType: "image/png",
+                  data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk",
+                  blob: "raw-binary-blob-content",
+                },
+                opaque: {
+                  encrypted_content: "AES256-CIPHERTEXT-LONG-BASE64",
+                  encrypted_stdout: "encrypted-stdout-bytes",
+                },
+                ephemeral: circularRef,
+              },
+            ],
+            isError: false,
+            timestamp: 0,
+          },
+        ],
+      } as unknown as Context,
+      {
+        apiKey: "sk-test",
+        onPayload(payload) {
+          capturedPayload = payload as Record<string, unknown>;
+          throw new Error("stop before network");
+        },
+      },
+    );
+
+    const result = await stream.result();
+    expect(result.stopReason).toBe("error");
+
+    const messages = capturedPayload?.messages as Array<Record<string, unknown>> | undefined;
+    const toolMsg = messages?.find((m) => m.role === "tool") as { content?: string } | undefined;
+    const content = toolMsg?.content;
+    expect(typeof content).toBe("string");
+    const text = content as string;
+
+    // Sensitive fields redacted
+    expect(text).toContain('"authorization":"***"');
+    expect(text).toContain('"x-api-key":"***"');
+    expect(text).toContain('"token":"***"');
+    expect(text).toContain('"password":"***"');
+    expect(text).not.toContain("sk-live-secret-token");
+    expect(text).not.toContain("ghp_personal_access_token");
+    expect(text).not.toContain("super-secret-pw");
+
+    // Binary data omitted
+    expect(text).toContain('"data":"[binary omitted: 60 chars]"');
+    expect(text).toContain('"blob":"[binary omitted: 23 chars]"');
+    expect(text).not.toContain("iVBORw0KGgo");
+
+    // Opaque fields omitted
+    expect(text).toContain('"encrypted_content":"[opaque data omitted: 29 chars]"');
+    expect(text).toContain('"encrypted_stdout":"[opaque data omitted: 22 chars]"');
+    expect(text).not.toContain("AES256-CIPHERTEXT");
+
+    // Circular reference safe
+    expect(text).toContain('"self":"[Circular]"');
+  });
+
+  it("caps oversized tool result payload text", async () => {
+    let capturedPayload: Record<string, unknown> | undefined;
+    const stream = streamOpenAICompletions(
+      model,
+      {
+        messages: [
+          {
+            role: "toolResult",
+            toolCallId: "call_big",
+            toolName: "log",
+            content: [{ type: "resource", data: "x".repeat(9000) }],
+            isError: false,
+            timestamp: 0,
+          },
+        ],
+      } as unknown as Context,
+      {
+        apiKey: "sk-test",
+        onPayload(payload) {
+          capturedPayload = payload as Record<string, unknown>;
+          throw new Error("stop before network");
+        },
+      },
+    );
+
+    const result = await stream.result();
+    expect(result.stopReason).toBe("error");
+
+    const messages = capturedPayload?.messages as Array<Record<string, unknown>> | undefined;
+    const toolMsg = messages?.find((m) => m.role === "tool") as { content?: string } | undefined;
+    const text = toolMsg?.content;
+    expect(typeof text).toBe("string");
+    expect(text).toContain("…(truncated)…");
+    expect((text as string).length).toBeLessThan(8100);
+  });
+
+  it("caps aggregate structured tool result payload text after merge", async () => {
+    let capturedPayload: Record<string, unknown> | undefined;
+    const stream = streamOpenAICompletions(
+      model,
+      {
+        messages: [
+          {
+            role: "toolResult",
+            toolCallId: "call_aggregate",
+            toolName: "logs",
+            content: Array.from({ length: 4 }, (_, index) => ({
+              type: "resource",
+              index,
+              data: "x".repeat(2500),
+            })),
+            isError: false,
+            timestamp: 0,
+          },
+        ],
+      } as unknown as Context,
+      {
+        apiKey: "sk-test",
+        onPayload(payload) {
+          capturedPayload = payload as Record<string, unknown>;
+          throw new Error("stop before network");
+        },
+      },
+    );
+
+    const result = await stream.result();
+    expect(result.stopReason).toBe("error");
+
+    const messages = capturedPayload?.messages as Array<Record<string, unknown>> | undefined;
+    const toolMsg = messages?.find((m) => m.role === "tool") as { content?: string } | undefined;
+    const text = toolMsg?.content;
+    expect(typeof text).toBe("string");
+    expect(text).toContain("…(truncated)…");
+    expect((text as string).length).toBeLessThan(8100);
+  });
 });

@@ -62,6 +62,8 @@ const proxyOpenAIModel = {
   baseUrl: "https://proxy.example.com/v1",
 } satisfies Model<"openai-responses">;
 
+const testAllowedToolCallProviders = new Set(["openai", "openai-codex", "opencode"]);
+
 function createAssistantOutput(): AssistantMessage {
   return {
     role: "assistant",
@@ -239,7 +241,7 @@ describe("convertResponsesTools", () => {
 });
 
 describe("convertResponsesMessages", () => {
-  const allowedToolCallProviders = new Set(["openai", "openai-codex", "opencode"]);
+  const allowedToolCallProviders = testAllowedToolCallProviders;
 
   it("adds explicit message item types for system and user input items", () => {
     const input = convertResponsesMessages(
@@ -620,6 +622,94 @@ describe("convertResponsesMessages", () => {
       encrypted_content: "ciphertext",
       summary: [],
     });
+  });
+
+  it("serializes structured tool results as text instead of image placeholders", () => {
+    const input = convertResponsesMessages(
+      nativeOpenAIModel,
+      {
+        systemPrompt: "system",
+        messages: [
+          {
+            role: "toolResult",
+            toolCallId: "call_structured",
+            toolName: "session_status",
+            content: [
+              {
+                type: "json",
+                encrypted_content: "opaque-provider-ciphertext",
+                payload: {
+                  sessionKey: "current",
+                  model: "openai/gpt-5.4",
+                  status: "ok",
+                  headers: { authorization: "Bearer provider-secret-token" },
+                  artifact: {
+                    mimeType: "application/octet-stream",
+                    data: "opaque-binary-payload",
+                  },
+                },
+              },
+            ],
+            isError: false,
+            timestamp: 1,
+          },
+        ],
+      } as unknown as Context,
+      testAllowedToolCallProviders,
+      { includeSystemPrompt: false, replayResponsesItemIds: false },
+    ) as unknown as Array<Record<string, unknown>>;
+    const outputItem = input.find((item) => item.type === "function_call_output");
+    const output = outputItem?.output;
+    if (typeof output !== "string") {
+      throw new Error("expected function_call_output string output");
+    }
+
+    expect(outputItem).toMatchObject({
+      type: "function_call_output",
+      call_id: "call_structured",
+    });
+    expect(output).toContain('"type":"json"');
+    expect(output).toContain('"authorization":"***"');
+    expect(output).toContain('"data":"[binary omitted:');
+    expect(output).toContain('"encrypted_content":"[opaque data omitted:');
+    expect(output).not.toContain("provider-secret-token");
+    expect(output).not.toContain("opaque-binary-payload");
+    expect(output).not.toContain("opaque-provider-ciphertext");
+  });
+
+  it("handles circular structured references and caps oversized tool result output", () => {
+    const circularRef: Record<string, unknown> = { type: "log", label: "self-loop" };
+    circularRef.parent = circularRef;
+
+    const input = convertResponsesMessages(
+      nativeOpenAIModel,
+      {
+        systemPrompt: "system",
+        messages: [
+          {
+            role: "toolResult",
+            toolCallId: "call_circular",
+            toolName: "inspect",
+            content: [circularRef, { type: "resource", data: "x".repeat(9000) }],
+            isError: false,
+            timestamp: 1,
+          },
+        ],
+      } as unknown as Context,
+      testAllowedToolCallProviders,
+      { includeSystemPrompt: false, replayResponsesItemIds: false },
+    ) as unknown as Array<Record<string, unknown>>;
+    const outputItem = input.find((item) => item.type === "function_call_output");
+    const output = outputItem?.output;
+    if (typeof output !== "string") {
+      throw new Error("expected function_call_output string output");
+    }
+
+    // Circular reference detected (no throw)
+    expect(output).toContain('"parent":"[Circular]"');
+    // Truncation applied to oversized payload
+    expect(output).toContain("…(truncated)…");
+    expect(output.length).toBeLessThan(8100);
   });
 });
 
