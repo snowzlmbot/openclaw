@@ -145,9 +145,13 @@ jobs:
                 visibleTexts: text(".sidebar-recent-session__switch"),
               },
               picker: {
+                listRole: document.querySelector(".chat-session-picker__list")?.getAttribute("role"),
+                rowRoles: attr(".chat-session-picker__option-row", "role"),
                 visibleRows: visibleCount(".chat-session-picker__option-row"),
                 switchLabels: attr(".chat-session-picker__option", "aria-label"),
                 switchCurrent: attr(".chat-session-picker__option", "aria-current"),
+                switchRoles: attr(".chat-session-picker__option", "role"),
+                switchAriaSelected: attr(".chat-session-picker__option", "aria-selected"),
                 renameLabels: attr(".chat-session-picker__rename", "aria-label"),
                 visibleTexts: text(".chat-session-picker__option"),
               },
@@ -162,6 +166,10 @@ jobs:
             [proof.sidebar.switchLabels.some((label) => label?.includes("Active")), "sidebar active state is announced"],
             [proof.sidebar.renameLabels.some((label) => label?.includes("Rename session") && label.includes("Alpha planning")), "sidebar rename label is readable"],
             [proof.picker.visibleRows > 0, "chat session picker rows are visible"],
+            [proof.picker.listRole === "list", "picker uses list semantics"],
+            [proof.picker.rowRoles.length > 0 && proof.picker.rowRoles.every((role) => role === "listitem"), "picker rows use listitem semantics"],
+            [proof.picker.switchRoles.every((role) => role === null), "picker switch buttons do not expose stale option roles"],
+            [proof.picker.switchAriaSelected.every((value) => value === null), "picker switch buttons do not expose stale aria-selected"],
             [proof.picker.switchLabels.some((label) => label?.includes("Switch to session") && label.includes("Alpha planning")), "picker switch/reopen label is readable"],
             [proof.picker.switchLabels.some((label) => label?.includes("Active")), "picker active state is announced"],
             [proof.picker.renameLabels.some((label) => label?.includes("Rename session") && label.includes("Alpha planning")), "picker rename label is readable"],
@@ -184,7 +192,7 @@ jobs:
             echo "- DOM proof: \`control-ui-session-history-proof.json\`"
             echo
             echo '```json'
-            node -e 'const proof=require("./proof-artifacts/control-ui-session-history-proof.json"); console.log(JSON.stringify({targetSha: proof.targetSha, newSession: proof.newSession, firstSidebarSwitch: proof.sidebar.switchLabels[0], firstSidebarRename: proof.sidebar.renameLabels[0], firstPickerSwitch: proof.picker.switchLabels[0], firstPickerRename: proof.picker.renameLabels[0]}, null, 2))'
+            node -e 'const proof=require("./proof-artifacts/control-ui-session-history-proof.json"); console.log(JSON.stringify({targetSha: proof.targetSha, newSession: proof.newSession, pickerListRole: proof.picker.listRole, pickerFirstRowRole: proof.picker.rowRoles[0], pickerFirstSwitchRole: proof.picker.switchRoles[0], pickerFirstSwitchAriaSelected: proof.picker.switchAriaSelected[0], firstSidebarSwitch: proof.sidebar.switchLabels[0], firstSidebarRename: proof.sidebar.renameLabels[0], firstPickerSwitch: proof.picker.switchLabels[0], firstPickerRename: proof.picker.renameLabels[0]}, null, 2))'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
