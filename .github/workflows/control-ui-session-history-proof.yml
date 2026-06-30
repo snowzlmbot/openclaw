@@ -1,0 +1,460 @@
+name: Control UI Session History Proof
+
+on:
+  push:
+    branches:
+      - proof/control-ui-session-history-96267
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact OpenClaw commit SHA to prove
+        required: true
+        default: dbf50d989f57d154da7874a58e4f75952fc3a1ec
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: control-ui-session-history-proof-${{ github.ref }}-${{ github.event.inputs.target_sha || 'dbf50d989f57d154da7874a58e4f75952fc3a1ec' }}
+  cancel-in-progress: true
+
+jobs:
+  proof:
+    name: Exact-head Control UI browser proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      TARGET_SHA: ${{ github.event.inputs.target_sha || 'dbf50d989f57d154da7874a58e4f75952fc3a1ec' }}
+    steps:
+      - name: Checkout proof harness branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Checkout exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "TARGET_SHA must be a 40-character SHA: $TARGET_SHA" >&2
+            exit 1
+          fi
+          git checkout --detach "$TARGET_SHA"
+          resolved="$(git rev-parse HEAD)"
+          if [[ "$resolved" != "$TARGET_SHA" ]]; then
+            echo "Checked out $resolved, expected $TARGET_SHA" >&2
+            exit 1
+          fi
+          echo "Exact PR head: $resolved" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v6
+        with:
+          node-version: 24.x
+          package-manager-cache: false
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+
+      - name: Ensure Playwright Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/ensure-playwright-chromium.mjs
+          corepack pnpm --dir ui exec playwright install --with-deps chromium
+
+      - name: Run Control UI proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proof-artifacts ui/.proof
+          corepack pnpm dev:ui:mock -- --host 127.0.0.1 --port 5187 > proof-artifacts/control-ui-mock.log 2>&1 &
+          server_pid="$!"
+          cleanup() {
+            kill "$server_pid" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:5187/chat >/dev/null; then
+              break
+            fi
+            if ! kill -0 "$server_pid" >/dev/null 2>&1; then
+              cat proof-artifacts/control-ui-mock.log >&2 || true
+              echo "Control UI mock server exited early" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          cat > ui/.proof/control-ui-session-history-proof.mjs <<'NODE'
+          import fs from "node:fs/promises";
+          import { chromium } from "playwright";
+
+          const targetSha = process.env.TARGET_SHA;
+          const browser = await chromium.launch({ headless: true });
+          const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+          await page.goto("http://127.0.0.1:5187/chat", { waitUntil: "networkidle" });
+          await page.locator(".sidebar-new-session").waitFor({ state: "visible", timeout: 30_000 });
+
+          // The sidebar recent list is populated by the shared sessions list state.
+          // Exercise a real UI path that loads it, then return to Chat.
+          await page.locator('a.nav-item[title="Sessions"]').click();
+          await page.waitForLoadState("networkidle");
+          await page.locator('a.nav-item[title="Chat"]').click();
+          await page.locator(".sidebar-recent-session__switch").first().waitFor({ state: "visible", timeout: 30_000 });
+          await page.locator(".sidebar-recent-session__rename").first().waitFor({ state: "visible" });
+
+          const trigger = page.locator(".sidebar-session-select .chat-controls__session-trigger").first();
+          await trigger.click();
+          await page.locator(".chat-session-picker").waitFor({ state: "visible", timeout: 10_000 });
+          await page.locator(".chat-session-picker__option").first().waitFor({ state: "visible" });
+          await page.locator(".chat-session-picker__rename").first().waitFor({ state: "visible" });
+
+          await page.screenshot({ path: "proof-artifacts/control-ui-session-history.png", fullPage: true });
+
+          const proof = await page.evaluate((sha) => {
+            const attr = (selector, name) =>
+              Array.from(document.querySelectorAll(selector)).map((entry) => entry.getAttribute(name));
+            const text = (selector) =>
+              Array.from(document.querySelectorAll(selector)).map((entry) => entry.textContent?.replace(/\s+/g, " ").trim());
+            const visibleCount = (selector) =>
+              Array.from(document.querySelectorAll(selector)).filter((entry) => {
+                const rect = entry.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+              }).length;
+            return {
+              targetSha: sha,
+              url: window.location.href,
+              newSession: {
+                ariaLabel: document.querySelector(".sidebar-new-session")?.getAttribute("aria-label"),
+                text: document.querySelector(".sidebar-new-session")?.textContent?.replace(/\s+/g, " ").trim(),
+              },
+              sidebar: {
+                visibleRows: visibleCount(".sidebar-recent-session"),
+                switchLabels: attr(".sidebar-recent-session__switch", "aria-label"),
+                switchCurrent: attr(".sidebar-recent-session__switch", "aria-current"),
+                renameLabels: attr(".sidebar-recent-session__rename", "aria-label"),
+                visibleTexts: text(".sidebar-recent-session__switch"),
+              },
+              picker: {
+                visibleRows: visibleCount(".chat-session-picker__option-row"),
+                switchLabels: attr(".chat-session-picker__option", "aria-label"),
+                switchCurrent: attr(".chat-session-picker__option", "aria-current"),
+                renameLabels: attr(".chat-session-picker__rename", "aria-label"),
+                visibleTexts: text(".chat-session-picker__option"),
+              },
+            };
+          }, targetSha);
+
+          const assertions = [
+            [proof.targetSha === targetSha, "proof target SHA matches exact PR head"],
+            [proof.newSession.ariaLabel === "New session", "New Session control has aria-label"],
+            [proof.sidebar.visibleRows > 0, "sidebar recent sessions are visible"],
+            [proof.sidebar.switchLabels.some((label) => label?.includes("Switch to session") && label.includes("Alpha planning")), "sidebar switch/reopen label is readable"],
+            [proof.sidebar.switchLabels.some((label) => label?.includes("Active")), "sidebar active state is announced"],
+            [proof.sidebar.renameLabels.some((label) => label?.includes("Rename session") && label.includes("Alpha planning")), "sidebar rename label is readable"],
+            [proof.picker.visibleRows > 0, "chat session picker rows are visible"],
+            [proof.picker.switchLabels.some((label) => label?.includes("Switch to session") && label.includes("Alpha planning")), "picker switch/reopen label is readable"],
+            [proof.picker.switchLabels.some((label) => label?.includes("Active")), "picker active state is announced"],
+            [proof.picker.renameLabels.some((label) => label?.includes("Rename session") && label.includes("Alpha planning")), "picker rename label is readable"],
+          ];
+          const failed = assertions.filter(([ok]) => !ok).map(([, message]) => message);
+          proof.assertions = assertions.map(([ok, message]) => ({ ok, message }));
+          await fs.writeFile("proof-artifacts/control-ui-session-history-proof.json", `${JSON.stringify(proof, null, 2)}\n`);
+          await browser.close();
+          if (failed.length > 0) {
+            throw new Error(`Control UI proof assertions failed: ${failed.join("; ")}`);
+          }
+          NODE
+
+          TARGET_SHA="$TARGET_SHA" node ui/.proof/control-ui-session-history-proof.mjs
+          {
+            echo "### Control UI session history proof"
+            echo
+            echo "- Exact head: \`$TARGET_SHA\`"
+            echo "- Screenshot: \`control-ui-session-history.png\`"
+            echo "- DOM proof: \`control-ui-session-history-proof.json\`"
+            echo
+            echo '```json'
+            node -e 'const proof=require("./proof-artifacts/control-ui-session-history-proof.json"); console.log(JSON.stringify({targetSha: proof.targetSha, newSession: proof.newSession, firstSidebarSwitch: proof.sidebar.switchLabels[0], firstSidebarRename: proof.sidebar.renameLabels[0], firstPickerSwitch: proof.picker.switchLabels[0], firstPickerRename: proof.picker.renameLabels[0]}, null, 2))'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload proof artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: control-ui-session-history-proof-${{ env.TARGET_SHA }}
+          path: proof-artifacts/
+          if-no-files-found: error
+
+  voiceover-proof:
+    name: Optional macOS VoiceOver speech proof
+    runs-on: macos-15
+    timeout-minutes: 35
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      TARGET_SHA: ${{ github.event.inputs.target_sha || 'dbf50d989f57d154da7874a58e4f75952fc3a1ec' }}
+    steps:
+      - name: Checkout proof harness branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Checkout exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "TARGET_SHA must be a 40-character SHA: $TARGET_SHA" >&2
+            exit 1
+          fi
+          git checkout --detach "$TARGET_SHA"
+          resolved="$(git rev-parse HEAD)"
+          if [[ "$resolved" != "$TARGET_SHA" ]]; then
+            echo "Checked out $resolved, expected $TARGET_SHA" >&2
+            exit 1
+          fi
+          echo "Exact PR head: $resolved" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v6
+        with:
+          node-version: 24.x
+          package-manager-cache: false
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+
+      - name: Capture macOS VoiceOver diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proof-artifacts
+          {
+            echo "# macOS VoiceOver diagnostics"
+            echo
+            sw_vers || true
+            echo
+            echo "VoiceOver AppleScript marker:"
+            ls -l /private/var/db/Accessibility/.VoiceOverAppleScriptEnabled || true
+            echo
+            echo "VoiceOver running state via AppleScript:"
+            osascript -e 'tell application "VoiceOver" to get running' || true
+            echo
+            echo "Chrome version:"
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --version || true
+          } > proof-artifacts/voiceover-permission-diagnostics.txt 2>&1
+          cat proof-artifacts/voiceover-permission-diagnostics.txt
+
+      - name: Run optional live VoiceOver pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proof-artifacts ui/.proof
+          corepack pnpm dev:ui:mock -- --host 127.0.0.1 --port 5188 > proof-artifacts/control-ui-mock-macos.log 2>&1 &
+          server_pid="$!"
+          cleanup() {
+            kill "$server_pid" >/dev/null 2>&1 || true
+            osascript -e 'tell application "VoiceOver" to quit' >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:5188/chat >/dev/null; then
+              break
+            fi
+            if ! kill -0 "$server_pid" >/dev/null 2>&1; then
+              cat proof-artifacts/control-ui-mock-macos.log >&2 || true
+              echo "Control UI mock server exited early" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          cat > ui/.proof/control-ui-session-history-voiceover-proof.mjs <<'NODE'
+          import fs from "node:fs/promises";
+          import { createRequire } from "node:module";
+
+          const require = createRequire(import.meta.url);
+          const { execFileSync, spawn } = require("node:child_process");
+          const { chromium } = require("playwright");
+
+          const targetSha = process.env.TARGET_SHA;
+          const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          const proof = {
+            targetSha,
+            status: "blocked",
+            reason: null,
+            phrases: [],
+            assertions: [],
+          };
+
+          const browser = await chromium.launch({
+            channel: "chrome",
+            headless: false,
+            args: ["--force-renderer-accessibility"],
+          });
+          const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+
+          async function capturePhrase(label) {
+            try {
+              const phrase = execFileSync(
+                "/usr/bin/osascript",
+                ["-l", "JavaScript", "-e", 'Application("VoiceOver").lastPhrase.content()'],
+                { encoding: "utf8", timeout: 5_000 },
+              ).trim();
+              proof.phrases.push({ label, phrase });
+              return phrase;
+            } catch (error) {
+              proof.phrases.push({ label, error: error.message });
+              throw error;
+            }
+          }
+
+          try {
+            await page.goto("http://127.0.0.1:5188/chat", { waitUntil: "networkidle" });
+            await page.locator(".sidebar-new-session").waitFor({ state: "visible", timeout: 30_000 });
+            await page.locator('a.nav-item[title="Sessions"]').click();
+            await page.waitForLoadState("networkidle");
+            await page.locator('a.nav-item[title="Chat"]').click();
+            await page.locator(".sidebar-recent-session__switch").first().waitFor({ state: "visible", timeout: 30_000 });
+            await page.locator(".sidebar-recent-session__rename").first().waitFor({ state: "visible" });
+            await page.locator(".sidebar-session-select .chat-controls__session-trigger").first().click();
+            await page.locator(".chat-session-picker").waitFor({ state: "visible", timeout: 10_000 });
+            await page.locator(".chat-session-picker__option").first().waitFor({ state: "visible" });
+            await page.locator(".chat-session-picker__rename").first().waitFor({ state: "visible" });
+            await page.screenshot({ path: "proof-artifacts/control-ui-session-history-voiceover-target.png", fullPage: true });
+            await page.bringToFront();
+            try {
+              execFileSync("/usr/bin/osascript", ["-e", 'tell application "Google Chrome" to activate'], { timeout: 5_000 });
+            } catch (error) {
+              proof.phrases.push({ label: "activate chrome", error: error.message });
+            }
+
+            const starter = spawn(
+              "/System/Library/CoreServices/VoiceOver.app/Contents/MacOS/VoiceOverStarter",
+              [],
+              { detached: true, stdio: "ignore" },
+            );
+            starter.unref();
+            proof.voiceOverStarterPid = starter.pid;
+            await wait(6_000);
+            await capturePhrase("after launch");
+
+            const focusTargets = [
+              { label: "new session", selector: ".sidebar-new-session" },
+              { label: "sidebar switch", selector: ".sidebar-recent-session__switch" },
+              { label: "sidebar rename", selector: ".sidebar-recent-session__rename" },
+              { label: "picker switch", selector: ".chat-session-picker__option" },
+              { label: "picker rename", selector: ".chat-session-picker__rename" },
+            ];
+
+            for (const target of focusTargets) {
+              try {
+                await page.locator(target.selector).first().focus();
+                await wait(1_500);
+                await capturePhrase(target.label);
+              } catch (error) {
+                proof.phrases.push({ label: target.label, error: error.message });
+              }
+            }
+
+            const spoken = proof.phrases.map((entry) => entry.phrase || "").join("\n");
+            proof.assertions = [
+              {
+                ok: proof.targetSha === targetSha,
+                message: "proof target SHA matches exact PR head",
+              },
+              {
+                ok: /New session/i.test(spoken),
+                message: "VoiceOver spoke New Session",
+              },
+              {
+                ok: /Switch to session.*Alpha planning/i.test(spoken),
+                message: "VoiceOver spoke switch/reopen label with readable title",
+              },
+              {
+                ok: /Rename session.*Alpha planning/i.test(spoken),
+                message: "VoiceOver spoke rename label with readable title",
+              },
+              {
+                ok: /Active/i.test(spoken),
+                message: "VoiceOver spoke active-state text",
+              },
+            ];
+            const failed = proof.assertions.filter((assertion) => !assertion.ok);
+            proof.status = failed.length === 0 ? "passed" : "inconclusive";
+            if (failed.length > 0) {
+              proof.reason = `VoiceOver ran, but expected phrases were not all captured: ${failed.map((entry) => entry.message).join("; ")}`;
+            }
+          } catch (error) {
+            proof.status = "blocked";
+            proof.reason = error && error.stack ? error.stack : String(error);
+          } finally {
+            try {
+              execFileSync("/usr/bin/osascript", ["-e", 'tell application "VoiceOver" to quit'], { timeout: 5_000 });
+            } catch (error) {
+              proof.phrases.push({ label: "quit", error: error.message });
+            }
+            await browser.close().catch(() => {});
+            await fs.writeFile("proof-artifacts/control-ui-session-history-voiceover-proof.json", `${JSON.stringify(proof, null, 2)}\n`);
+            await fs.writeFile(
+              "proof-artifacts/control-ui-session-history-voiceover-phrases.txt",
+              proof.phrases
+                .map((entry) => `${entry.label}: ${entry.phrase || entry.error || ""}`)
+                .join("\n") + "\n",
+            );
+          }
+          NODE
+
+          set +e
+          TARGET_SHA="$TARGET_SHA" node ui/.proof/control-ui-session-history-voiceover-proof.mjs \
+            > proof-artifacts/control-ui-session-history-voiceover.log 2>&1
+          node_exit="$?"
+          set -e
+
+          cat proof-artifacts/control-ui-session-history-voiceover.log || true
+          if [[ ! -f proof-artifacts/control-ui-session-history-voiceover-proof.json ]]; then
+            jq -n --arg targetSha "$TARGET_SHA" --arg reason "VoiceOver proof script exited before writing proof JSON; exit=$node_exit" \
+              '{targetSha:$targetSha,status:"blocked",reason:$reason,phrases:[],assertions:[]}' \
+              > proof-artifacts/control-ui-session-history-voiceover-proof.json
+          fi
+
+          voiceover_status="$(jq -r '.status' proof-artifacts/control-ui-session-history-voiceover-proof.json)"
+          voiceover_reason="$(jq -r '.reason // ""' proof-artifacts/control-ui-session-history-voiceover-proof.json)"
+          {
+            echo "### macOS VoiceOver speech proof"
+            echo
+            printf -- '- Exact head: `%s`\n' "$TARGET_SHA"
+            printf -- '- Status: `%s`\n' "$voiceover_status"
+            if [[ -n "$voiceover_reason" ]]; then
+              echo "- Reason: $voiceover_reason"
+            fi
+            echo '- Target screenshot: `control-ui-session-history-voiceover-target.png`'
+            echo '- VoiceOver phrases: `control-ui-session-history-voiceover-phrases.txt`'
+            echo '- VoiceOver proof JSON: `control-ui-session-history-voiceover-proof.json`'
+            echo
+            echo '```json'
+            jq '{targetSha,status,reason,phrases,assertions}' proof-artifacts/control-ui-session-history-voiceover-proof.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload VoiceOver artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: control-ui-session-history-voiceover-${{ env.TARGET_SHA }}
+          path: proof-artifacts/
+          if-no-files-found: error
