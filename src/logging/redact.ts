@@ -1132,10 +1132,27 @@ function shouldPreserveStructuredDiagnosticCode(
   if (pathEndsWith(path, ["status", "code"])) {
     return STRUCTURED_DIAGNOSTIC_STATUS_CODE_VALUES.has(value);
   }
-  if (path.length === 2 && path[0] === "error" && path[1] === "code") {
+  if (isStructuredDiagnosticErrorCodePath(path)) {
     return STRUCTURED_DIAGNOSTIC_ERROR_CODE_VALUE_RE.test(value);
   }
   return false;
+}
+
+function isStructuredDiagnosticErrorCodePath(path: readonly string[]): boolean {
+  if (!pathEndsWith(path, ["error", "code"])) {
+    return false;
+  }
+  if (path.length === 2) {
+    return true;
+  }
+  const normalizedPath = path.map((part) => part.toLowerCase());
+  if (normalizedPath.some((part) => part.includes("oauth") || part.includes("provider"))) {
+    return false;
+  }
+  return normalizedPath.some(
+    (part) =>
+      part.includes("diagnostic") || part.includes("stability") || part.includes("trajectory"),
+  );
 }
 
 function isPlainRedactableObject(value: object): value is Record<string, unknown> {
