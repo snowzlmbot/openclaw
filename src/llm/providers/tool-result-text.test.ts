@@ -16,6 +16,7 @@ describe("extractToolResultText", () => {
         jwt: "jwt-value-1234567890",
         session: "session-value-1234567890",
         code: "code-value-1234567890",
+        oauth: { code: "OPAQUEPROVIDERCODE1234567890" },
         signature: "signature-value-1234567890",
         cookie: "cookie-value-1234567890",
         "set-cookie": "set-cookie-value-1234567890",
@@ -44,6 +45,7 @@ describe("extractToolResultText", () => {
     expect(text).not.toContain("jwt-value-1234567890");
     expect(text).not.toContain("session-value-1234567890");
     expect(text).not.toContain("code-value-1234567890");
+    expect(text).not.toContain("OPAQUEPROVIDERCODE1234567890");
     expect(text).not.toContain("signature-value-1234567890");
     expect(text).not.toContain("cookie-value-1234567890");
     expect(text).not.toContain("set-cookie-value-1234567890");

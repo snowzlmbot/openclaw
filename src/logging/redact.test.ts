@@ -1153,19 +1153,28 @@ describe("redactSecrets", () => {
     const output = redactSecrets({
       manifest: {
         sourceFiles: { session: "$WORKSPACE_DIR/session.jsonl" },
-        warnings: [{ code: "invalid-runtime-event" }, { code: "cyclic-session-branch" }],
+        warnings: [
+          { code: "invalid-runtime-event" },
+          { code: "cyclic-session-branch" },
+          { code: "incomplete-session-branch" },
+        ],
       },
       status: { code: "SYSTEM_RUN_DENIED" },
+      error: { code: "ERR_TEST" },
       oauth: { code: "oauth-code-value-1234567890" },
+      provider: { code: "PROVIDEROPAQUECODE1234567890" },
     });
 
     expect(output.manifest.sourceFiles.session).toBe("$WORKSPACE_DIR/session.jsonl");
     expect(output.manifest.warnings).toEqual([
       { code: "invalid-runtime-event" },
       { code: "cyclic-session-branch" },
+      { code: "incomplete-session-branch" },
     ]);
     expect(output.status.code).toBe("SYSTEM_RUN_DENIED");
+    expect(output.error.code).toBe("ERR_TEST");
     expect(output.oauth.code).not.toBe("oauth-code-value-1234567890");
+    expect(output.provider.code).not.toBe("PROVIDEROPAQUECODE1234567890");
   });
 });
 

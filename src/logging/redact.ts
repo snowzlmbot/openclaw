@@ -91,9 +91,17 @@ const STRUCTURED_SECRET_FIELD_RE = new RegExp(
   String.raw`^(?:api[-_]?key|apiKey|api[-_]?token|apiToken|token|secret|password|passwd|credential|authorization|private[-_]?key|privateKey|access[-_]?token|accessToken|refresh[-_]?token|refreshToken|id[-_]?token|idToken|auth[-_]?token|authToken|client[-_]?secret|clientSecret|app[-_]?secret|appSecret|secret[-_]?value|secretValue|raw[-_]?secret|rawSecret|secret[-_]?input|secretInput|key|key[-_]?material|keyMaterial|jwt|session|code|signature|cookie|set[-_]?cookie|${PAYMENT_CREDENTIAL_QUERY_KEYS}|${PAYMENT_CREDENTIAL_JSON_KEYS})$`,
   "i",
 );
-const STRUCTURED_STATUS_CODE_VALUE_RE = /^[A-Z][A-Z0-9_:-]{0,47}$/u;
-const STRUCTURED_INTERNAL_WARNING_CODE_VALUE_RE =
-  /^(?:cyclic|duplicate|invalid|missing|orphaned|skipped|stale|truncated|unknown|unlinked|unresolved)-[a-z0-9-]{1,80}$/u;
+const STRUCTURED_DIAGNOSTIC_STATUS_CODE_VALUES = new Set(["SYSTEM_RUN_DENIED"]);
+const STRUCTURED_INTERNAL_WARNING_CODE_VALUES = new Set([
+  "cyclic-session-branch",
+  "incomplete-session-branch",
+  "invalid-runtime-event",
+  "invalid-runtime-json",
+  "invalid-session-json",
+  "invalid-session-row",
+]);
+const STRUCTURED_DIAGNOSTIC_ERROR_CODE_VALUE_RE =
+  /^(?:ERR_[A-Z0-9_]{1,80}|E[A-Z0-9_]{2,40}|MODULE_NOT_FOUND|UND_ERR_[A-Z0-9_]{1,80}|OPENCLAW_[A-Z0-9_]{1,80})$/u;
 const STRUCTURED_INTERNAL_SOURCE_PATH_VALUE_RE = /^\$WORKSPACE_DIR\/[A-Za-z0-9._/-]+\.jsonl$/u;
 const STRUCTURED_APP_PASSWORD_FIELD_RE =
   /^(?:apple|icloud|app[-_]?specific[-_]?password|appSpecificPassword|application[-_]?password|text|content|message|error|errorMessage|detail|details|reason)$/i;
@@ -1042,6 +1050,7 @@ function redactSensitiveFieldValueWithOptions(
   key: string,
   value: string,
   options: RedactOptions,
+  path: readonly string[] = [key],
 ): string {
   const resolved = resolveRedactOptions(options);
   if (resolved.mode === "off") {
@@ -1061,11 +1070,7 @@ function redactSensitiveFieldValueWithOptions(
     return redacted;
   }
   const normalizedStructuredKey = key.toLowerCase();
-  if (
-    normalizedStructuredKey === "code" &&
-    (STRUCTURED_STATUS_CODE_VALUE_RE.test(value) ||
-      STRUCTURED_INTERNAL_WARNING_CODE_VALUE_RE.test(value))
-  ) {
+  if (shouldPreserveStructuredDiagnosticCode(normalizedStructuredKey, value, path)) {
     return value;
   }
   if (
@@ -1103,6 +1108,36 @@ export function redactSensitiveFieldValueWithConfig(
   );
 }
 
+function pathEndsWith(path: readonly string[], suffix: readonly string[]): boolean {
+  if (path.length < suffix.length) {
+    return false;
+  }
+  return suffix.every((part, index) => path[path.length - suffix.length + index] === part);
+}
+
+function shouldPreserveStructuredDiagnosticCode(
+  normalizedKey: string,
+  value: string,
+  path: readonly string[],
+): boolean {
+  if (normalizedKey !== "code") {
+    return false;
+  }
+  if (
+    pathEndsWith(path, ["warnings", "code"]) &&
+    STRUCTURED_INTERNAL_WARNING_CODE_VALUES.has(value)
+  ) {
+    return true;
+  }
+  if (pathEndsWith(path, ["status", "code"])) {
+    return STRUCTURED_DIAGNOSTIC_STATUS_CODE_VALUES.has(value);
+  }
+  if (pathEndsWith(path, ["error", "code"])) {
+    return STRUCTURED_DIAGNOSTIC_ERROR_CODE_VALUE_RE.test(value);
+  }
+  return false;
+}
+
 function isPlainRedactableObject(value: object): value is Record<string, unknown> {
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
@@ -1113,9 +1148,10 @@ function redactStructuredSecretValue(
   value: unknown,
   seen: WeakSet<object>,
   options: RedactOptions,
+  path: readonly string[] = key ? [key] : [],
 ): unknown {
   if (typeof value === "string") {
-    return redactSensitiveFieldValueWithOptions(key, value, options);
+    return redactSensitiveFieldValueWithOptions(key, value, options, path);
   }
   if (value === null || value === undefined) {
     return value;
@@ -1128,7 +1164,7 @@ function redactStructuredSecretValue(
       return "[Circular]";
     }
     seen.add(value);
-    const out = value.map((entry) => redactStructuredSecretValue(key, entry, seen, options));
+    const out = value.map((entry) => redactStructuredSecretValue(key, entry, seen, options, path));
     seen.delete(value);
     return out;
   }
@@ -1142,7 +1178,10 @@ function redactStructuredSecretValue(
     seen.add(value);
     const out: Record<string, unknown> = {};
     for (const [nestedKey, nestedValue] of Object.entries(value)) {
-      out[nestedKey] = redactStructuredSecretValue(nestedKey, nestedValue, seen, options);
+      out[nestedKey] = redactStructuredSecretValue(nestedKey, nestedValue, seen, options, [
+        ...path,
+        nestedKey,
+      ]);
     }
     seen.delete(value);
     return out;
