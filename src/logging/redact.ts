@@ -100,6 +100,8 @@ const STRUCTURED_INTERNAL_WARNING_CODE_VALUES = new Set([
   "invalid-session-json",
   "invalid-session-row",
 ]);
+const STRUCTURED_DIAGNOSTIC_ERROR_CODE_VALUE_RE =
+  /^(?:ERR_[A-Z0-9_]{1,80}|E[A-Z0-9_]{2,40}|MODULE_NOT_FOUND|UND_ERR_[A-Z0-9_]{1,80}|OPENCLAW_[A-Z0-9_]{1,80})$/u;
 const STRUCTURED_INTERNAL_SOURCE_PATH_VALUE_RE = /^\$WORKSPACE_DIR\/[A-Za-z0-9._/-]+\.jsonl$/u;
 const STRUCTURED_APP_PASSWORD_FIELD_RE =
   /^(?:apple|icloud|app[-_]?specific[-_]?password|appSpecificPassword|application[-_]?password|text|content|message|error|errorMessage|detail|details|reason)$/i;
@@ -1129,6 +1131,9 @@ function shouldPreserveStructuredDiagnosticCode(
   }
   if (pathEndsWith(path, ["status", "code"])) {
     return STRUCTURED_DIAGNOSTIC_STATUS_CODE_VALUES.has(value);
+  }
+  if (path.length === 2 && path[0] === "error" && path[1] === "code") {
+    return STRUCTURED_DIAGNOSTIC_ERROR_CODE_VALUE_RE.test(value);
   }
   return false;
 }
