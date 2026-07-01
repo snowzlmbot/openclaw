@@ -20,6 +20,7 @@ import {
   resetChatSessionPickerState,
   resolveSessionOptionGroups,
 } from "./chat/session-controls.ts";
+import { cacheChatMessages, readChatMessagesFromCache } from "./chat/session-message-cache.ts";
 import { refreshSlashCommands } from "./chat/slash-commands.ts";
 import { resolveControlUiAuthToken } from "./control-ui-auth.ts";
 import { loadChatHistory } from "./controllers/chat.ts";
@@ -138,25 +139,45 @@ function restoreChatQueueForSession(state: AppViewState, sessionKey: string): Ch
   return [...(state.chatQueueBySession?.[sessionKey] ?? [])];
 }
 
+function chatMessageCacheForState(state: AppViewState) {
+  return (state.chatMessagesBySession ??= new Map());
+}
+
+function saveChatMessagesForSession(state: AppViewState, sessionKey: string) {
+  cacheChatMessages(chatMessageCacheForState(state), state, { sessionKey }, state.chatMessages);
+}
+
+function restoreChatMessagesForSession(state: AppViewState, sessionKey: string): unknown[] {
+  return readChatMessagesFromCache(chatMessageCacheForState(state), state, { sessionKey });
+}
+
 function resetChatStateForSessionSwitch(state: AppViewState, sessionKey: string) {
   const host = state as unknown as SessionSwitchHost;
   const previousSessionKey = state.sessionKey;
   persistChatComposerState(state, previousSessionKey);
   saveChatQueueForSession(state, previousSessionKey);
+  saveChatMessagesForSession(state, previousSessionKey);
   state.sessionKey = sessionKey;
   if (previousSessionKey !== sessionKey) {
     resetChatSessionPickerState(state);
   }
-  (state as unknown as { currentSessionId?: string | null }).currentSessionId = null;
+  const chatSessionState = state as unknown as {
+    currentSessionId?: string | null;
+    reconnectResumeSessionId?: string | null;
+  };
+  chatSessionState.currentSessionId = null;
+  chatSessionState.reconnectResumeSessionId = null;
   state.chatMessage = "";
   state.chatAttachments = [];
-  state.chatMessages = [];
+  state.chatReplyTarget = null;
+  state.chatMessages = restoreChatMessagesForSession(state, sessionKey);
   state.chatToolMessages = [];
   state.activityEntries = [];
   state.activityExpandedIds = new Set();
   state.activityAtBottom = true;
   state.chatStreamSegments = [];
   state.chatThinkingLevel = null;
+  state.chatVerboseLevel = null;
   state.chatStream = null;
   state.chatSideResult = null;
   state.lastError = null;
@@ -344,12 +365,16 @@ export function renderChatControls(state: AppViewState) {
   const disableThinkingToggle = state.onboarding;
   const showThinking = state.onboarding ? false : state.settings.chatShowThinking;
   const showToolCalls = state.onboarding ? true : state.settings.chatShowToolCalls;
+  const persistCommentary = state.settings.chatPersistCommentary === true;
   const thinkingLabel = disableThinkingToggle
     ? t("chat.onboardingDisabled")
     : t("chat.thinkingToggle");
   const toolCallsLabel = disableThinkingToggle
     ? t("chat.onboardingDisabled")
     : t("chat.toolCallsToggle");
+  const commentaryLabel = disableThinkingToggle
+    ? t("chat.onboardingDisabled")
+    : t("chat.commentaryToggle");
   const refreshDisabled =
     !state.connected ||
     state.chatManualRefreshInFlight ||
@@ -483,6 +508,28 @@ export function renderChatControls(state: AppViewState) {
               <span class="chat-settings-action__text">${t("agents.tabs.tools")}</span>
             </button>
             <button
+              class="btn btn--sm btn--icon chat-settings-action ${persistCommentary
+                ? "active"
+                : ""}"
+              ?disabled=${disableThinkingToggle}
+              @click=${() => {
+                if (disableThinkingToggle) {
+                  return;
+                }
+                state.applySettings({
+                  ...state.settings,
+                  chatPersistCommentary: !persistCommentary,
+                });
+              }}
+              aria-pressed=${persistCommentary}
+              title=${commentaryLabel}
+              aria-label=${commentaryLabel}
+              data-tooltip=${commentaryLabel}
+            >
+              ${persistCommentary ? icons.pin : icons.pinOff}
+              <span class="chat-settings-action__text">${t("chat.commentaryLabel")}</span>
+            </button>
+            <button
               class="btn btn--sm btn--icon chat-settings-action ${hideCron ? "active" : ""}"
               @click=${() => {
                 state.sessionsHideCron = !hideCron;
@@ -513,6 +560,7 @@ export function renderChatMobileToggle(state: AppViewState) {
   const disableThinkingToggle = state.onboarding;
   const showThinking = state.onboarding ? false : state.settings.chatShowThinking;
   const showToolCalls = state.onboarding ? true : state.settings.chatShowToolCalls;
+  const persistCommentary = state.settings.chatPersistCommentary === true;
   const hideCron = state.sessionsHideCron ?? true;
   const hiddenCronCount = hideCron ? countHiddenCronSessions(state, state.sessionsResult) : 0;
   const toolCallsIcon = html`
@@ -605,6 +653,22 @@ export function renderChatMobileToggle(state: AppViewState) {
               title=${t("chat.toolCallsToggle")}
             >
               ${toolCallsIcon}
+            </button>
+            <button
+              class="btn btn--sm btn--icon ${persistCommentary ? "active" : ""}"
+              ?disabled=${disableThinkingToggle}
+              @click=${() => {
+                if (!disableThinkingToggle) {
+                  state.applySettings({
+                    ...state.settings,
+                    chatPersistCommentary: !persistCommentary,
+                  });
+                }
+              }}
+              aria-pressed=${persistCommentary}
+              title=${t("chat.commentaryToggle")}
+            >
+              ${persistCommentary ? icons.pin : icons.pinOff}
             </button>
             <button
               class="btn btn--sm btn--icon ${hideCron ? "active" : ""}"
@@ -833,17 +897,18 @@ export function renderTopbarThemeModeToggle(state: AppViewState) {
   return html`
     <div class="topbar-theme-mode" role="group" aria-label=${t("common.colorMode")}>
       ${THEME_MODE_OPTIONS.map((opt) => {
+        // Group aria-label already says "Color mode"; per-button label only needs
+        // the differentiating mode name (System/Light/Dark).
         const label = t(opt.labelKey);
-        const tooltip = t("common.colorModeOption", { mode: label });
         return html`
           <button
             type="button"
             class="topbar-theme-mode__btn ${opt.id === state.themeMode
               ? "topbar-theme-mode__btn--active"
               : ""}"
-            title=${tooltip}
-            aria-label=${tooltip}
-            data-tooltip=${tooltip}
+            title=${label}
+            aria-label=${label}
+            data-tooltip=${label}
             aria-pressed=${opt.id === state.themeMode}
             @click=${(e: Event) => applyMode(opt.id, e)}
           >
