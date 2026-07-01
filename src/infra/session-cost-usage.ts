@@ -76,8 +76,8 @@ export type {
 
 // Bump when the *meaning* of cached totals changes (not just their inputs), so durable
 // caches written by older builds are rebuilt instead of served stale. Bumped to 5:
-// recorded zero-cost usage for known positive pricing is now estimated from tokens,
-// so a warm cache from a pre-change build would otherwise keep reporting $0 totals.
+// direct DeepSeek V4 placeholder zero-cost usage is now estimated from tokens, so a
+// warm cache from a pre-change build would otherwise keep reporting $0 totals.
 const USAGE_COST_CACHE_VERSION = 5;
 const USAGE_COST_CACHE_FILE = ".usage-cost-cache.json";
 const USAGE_COST_CACHE_LOCK_WRITE_GRACE_MS = 10_000;
@@ -1046,12 +1046,27 @@ const isModelPricingKnown = (cost: ReturnType<typeof resolveModelCostConfig>): b
   return cost.input > 0 || cost.output > 0 || cost.cacheRead > 0 || cost.cacheWrite > 0;
 };
 
+const DEEPSEEK_V4_MODEL_IDS = new Set(["deepseek-v4-flash", "deepseek-v4-pro"]);
+
+const isDirectDeepSeekV4ModelRef = (params: { provider?: string; model?: string }): boolean => {
+  const provider = normalizeOptionalString(params.provider)?.toLowerCase();
+  const model = normalizeOptionalString(params.model);
+  if (provider !== "deepseek" || !model) {
+    return false;
+  }
+  const modelId = (model.split("/").at(-1) ?? model).toLowerCase();
+  return DEEPSEEK_V4_MODEL_IDS.has(modelId);
+};
+
 const shouldRecomputeRecordedZeroCost = (params: {
   cost: ReturnType<typeof resolveModelCostConfig>;
   costTotal: number | undefined;
+  model?: string;
+  provider?: string;
   usage: NormalizedUsage;
 }): boolean =>
   params.costTotal === 0 &&
+  isDirectDeepSeekV4ModelRef(params) &&
   isModelPricingKnown(params.cost) &&
   computeUsageTokenTotals(params.usage).totalTokens > 0;
 
@@ -1161,11 +1176,17 @@ async function scanTranscriptFile(params: {
         entry.costTotal = estimateUsageCost({ usage: entry.usage, cost });
         entry.costBreakdown = undefined;
       } else if (
-        shouldRecomputeRecordedZeroCost({ usage: entry.usage, cost, costTotal: entry.costTotal })
+        shouldRecomputeRecordedZeroCost({
+          usage: entry.usage,
+          cost,
+          costTotal: entry.costTotal,
+          provider: entry.provider,
+          model: entry.model,
+        })
       ) {
-        // Some provider transports report a literal zero cost even when the model has
-        // positive catalog pricing. Treat that zero as missing provider cost and use
-        // the configured pricing estimate instead of preserving a fabricated $0.
+        // Direct DeepSeek V4 transcripts can contain placeholder zero costs even
+        // though catalog pricing is known. Keep recorded zeros authoritative by
+        // default so provider-billed $0 totals, such as OpenRouter, stay intact.
         entry.costTotal = estimateUsageCost({ usage: entry.usage, cost });
         entry.costBreakdown = undefined;
       } else if (
@@ -2666,6 +2687,8 @@ export async function loadSessionLogs(params: {
               usage,
               cost: costConfig,
               costTotal: breakdown.total,
+              provider: message.provider as string | undefined,
+              model: message.model as string | undefined,
             })
           ) {
             cost = breakdown.total;

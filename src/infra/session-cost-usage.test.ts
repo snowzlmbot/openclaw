@@ -358,6 +358,64 @@ describe("session cost usage", () => {
     });
   });
 
+  it("preserves provider-billed recorded zero costs for non-DeepSeek models", async () => {
+    const root = await makeSessionCostRoot("cost-provider-billed-zero-total");
+    const sessionsDir = path.join(root, "agents", "main", "sessions");
+    await fs.mkdir(sessionsDir, { recursive: true });
+
+    const entry = {
+      type: "message",
+      timestamp: new Date().toISOString(),
+      message: {
+        role: "assistant",
+        content: "OpenRouter billed-free answer",
+        provider: "openrouter",
+        model: "openai/gpt-5.5",
+        usage: {
+          input: 10_000,
+          output: 10_000,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 20_000,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+      },
+    };
+
+    await fs.writeFile(
+      path.join(sessionsDir, "sess-openrouter-zero.jsonl"),
+      transcriptText("sess-openrouter-zero", entry),
+      "utf-8",
+    );
+
+    const config = {
+      models: {
+        providers: {
+          openrouter: {
+            models: [
+              {
+                id: "openai/gpt-5.5",
+                cost: { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0 },
+              },
+            ],
+          },
+        },
+      },
+    } as unknown as OpenClawConfig;
+
+    clearGatewayModelPricingCacheState();
+    await withStateDir(root, async () => {
+      const summary = await loadCostUsageSummary({ days: 30, config });
+      expect(summary.totals.totalTokens).toBe(20_000);
+      expect(summary.totals.totalCost).toBe(0);
+      expect(summary.totals.missingCostEntries).toBe(0);
+
+      const logs = await loadSessionLogs({ sessionId: "sess-openrouter-zero", config });
+      expect(logs?.[0]?.tokens).toBe(20_000);
+      expect(logs?.[0]?.cost).toBe(0);
+    });
+  });
+
   it("keeps zero-token recorded zero costs at zero even when pricing is known", async () => {
     const root = await makeSessionCostRoot("cost-known-pricing-zero-token");
     const sessionsDir = path.join(root, "agents", "main", "sessions");
