@@ -1,4 +1,4 @@
-import { redactSecrets } from "../../logging/redact.js";
+import { redactSecrets, redactToolPayloadText } from "../../logging/redact.js";
 import { truncateUtf16Safe } from "../../shared/utf16-slice.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 
@@ -57,10 +57,25 @@ function redactInlineDataUris(value: string): string {
   );
 }
 
+function redactStructuredTextValue(value: string): string {
+  const redacted = redactToolPayloadText(value);
+  const trimmed = redacted.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    return redacted;
+  }
+  try {
+    const redactedWrapper = redactSecrets({ structuredTextValue: JSON.parse(redacted) });
+    return JSON.stringify(redactedWrapper.structuredTextValue);
+  } catch {
+    return redacted;
+  }
+}
+
 function stringifyStructuredBlock(block: Record<string, unknown>): string | undefined {
   const seen = new WeakSet<object>();
   try {
-    const redactedBlock = redactSecrets(block);
+    const redactedWrapper = redactSecrets({ structuredToolResult: block });
+    const redactedBlock = redactedWrapper.structuredToolResult;
     const serialized = JSON.stringify(
       redactedBlock,
       function structuredToolResultReplacer(this: unknown, key, value) {
@@ -77,7 +92,7 @@ function stringifyStructuredBlock(block: Record<string, unknown>): string | unde
           return value.toString();
         }
         if (typeof value === "string") {
-          return redactInlineDataUris(value);
+          return redactInlineDataUris(redactStructuredTextValue(value));
         }
         if (typeof value === "function" || typeof value === "symbol" || value === undefined) {
           return undefined;

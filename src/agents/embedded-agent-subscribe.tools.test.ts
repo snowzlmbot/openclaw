@@ -124,6 +124,24 @@ describe("extractToolErrorMessage", () => {
     expect(extractToolErrorCode(sanitized)).toBe("INVALID_REQUEST");
   });
 
+  it("preserves direct structured tool error codes through sanitization", () => {
+    const detailsCode = sanitizeToolResult({
+      details: {
+        status: "failed",
+        code: "output_limit_exceeded",
+      },
+    }) as { details: { code: string } };
+    const rootCode = sanitizeToolResult({
+      status: "failed",
+      code: "output_limit_exceeded",
+    }) as { code: string };
+
+    expect(detailsCode.details.code).toBe("output_limit_exceeded");
+    expect(extractToolErrorCode(detailsCode)).toBe("output_limit_exceeded");
+    expect(rootCode.code).toBe("output_limit_exceeded");
+    expect(extractToolErrorCode(rootCode)).toBe("output_limit_exceeded");
+  });
+
   it("does not extract error codes from prose-only tool output", () => {
     expect(
       extractToolErrorCode({

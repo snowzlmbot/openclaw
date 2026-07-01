@@ -1173,6 +1173,8 @@ describe("redactSecrets", () => {
       oauthNestedError: { error: { code: "ERR_OPAQUEOAUTHCODE1234567890" } },
       provider: { code: "provider-code-value-1234567890" },
       providerAuth: { code: "provider-auth-code-value-1234567890" },
+      bearerToken: "bearer-token-value-1234567890",
+      bearer_token: "bearer-token-snake-value-1234567890",
       providerDetails: { error: { code: "SYSTEM_RUN_DENIED" } },
       providerNestedError: { error: { code: "ERR_PROVIDEROPAQUECODE1234567890" } },
       numericSecrets: { cardNumber: 4111111111111111, cvc: 123, token: 1234567890, amount: 4200 },
@@ -1198,6 +1200,8 @@ describe("redactSecrets", () => {
     expect(output.oauthNestedError.error.code).toBe("ERR_OPAQUEOAUTHCODE1234567890");
     expect(output.provider.code).not.toBe("provider-code-value-1234567890");
     expect(output.providerAuth.code).not.toBe("provider-auth-code-value-1234567890");
+    expect(output.bearerToken).not.toBe("bearer-token-value-1234567890");
+    expect(output.bearer_token).not.toBe("bearer-token-snake-value-1234567890");
     expect(output.providerDetails.error.code).toBe("SYSTEM_RUN_DENIED");
     expect(output.providerNestedError.error.code).toBe("ERR_PROVIDEROPAQUECODE1234567890");
     expect(output.numericSecrets).toEqual({

@@ -11,6 +11,8 @@ describe("extractToolResultText", () => {
         private_key: "private-key-snake-1234567890",
         key: "generic-key-value-1234567890",
         keyMaterial: "key-material-value-1234567890",
+        bearerToken: "bearer-token-value-1234567890",
+        bearer_token: "bearer-token-snake-value-1234567890",
         jwt: "jwt-value-1234567890",
         session: "session-value-1234567890",
         code: "code-value-1234567890",
@@ -23,6 +25,7 @@ describe("extractToolResultText", () => {
         paymentCredential: "payment-credential-value-1234567890",
         cardNumber: 4111111111111111,
         cvc: 123,
+        text: '{"apiToken":"api-token-in-text-1234567890","code":"oauth-code-in-text-1234567890","safe":"ok"}',
         credential: "live-credential-value",
         appSecret: "app-secret-value",
         rawSecret: "raw-secret-value",
@@ -45,6 +48,8 @@ describe("extractToolResultText", () => {
     expect(text).not.toContain("private-key-snake-1234567890");
     expect(text).not.toContain("generic-key-value-1234567890");
     expect(text).not.toContain("key-material-value-1234567890");
+    expect(text).not.toContain("bearer-token-value-1234567890");
+    expect(text).not.toContain("bearer-token-snake-value-1234567890");
     expect(text).not.toContain("jwt-value-1234567890");
     expect(text).not.toContain("session-value-1234567890");
     expect(text).not.toContain("code-value-1234567890");
@@ -55,6 +60,9 @@ describe("extractToolResultText", () => {
     expect(text).not.toContain("payment-credential-value-1234567890");
     expect(text).not.toContain("4111111111111111");
     expect(text).not.toContain('"cvc":123');
+    expect(text).not.toContain("api-token-in-text-1234567890");
+    expect(text).not.toContain("oauth-code-in-text-1234567890");
+    expect(text).toContain('\\"safe\\":\\"ok\\"');
     expect(text).not.toContain("live-credential-value");
     expect(text).not.toContain("app-secret-value");
     expect(text).not.toContain("raw-secret-value");

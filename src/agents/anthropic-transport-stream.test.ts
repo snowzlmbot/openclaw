@@ -2602,7 +2602,7 @@ describe("anthropic transport stream", () => {
     // No images → returns sanitized text string, not array
     expect(typeof toolResult.content).toBe("string");
     expect(toolResult.content).toContain('"type":"resource"');
-    expect(toolResult.content).toContain('{\\"key\\":\\"value\\"}');
+    expect(toolResult.content).toContain('{\\"key\\":\\"***\\"}');
     expect(toolResult.is_error).toBe(false);
   });
 
