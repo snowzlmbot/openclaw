@@ -155,7 +155,15 @@ function responseStreamChunkByteLengthUnchecked(chunk: unknown): number | undefi
   }
   // Plain stream deltas can carry an accumulated partial snapshot. Byte metrics
   // count the new stream payload, not the answer-so-far replay.
-  const { partial: _partial, ...snapshotlessChunk } = chunk;
+  // Avoid object rest on this stream hot path while preserving own __proto__
+  // chunk fields as data keys instead of hitting Object.prototype's setter.
+  const snapshotlessChunk = Object.create(null) as Record<string, unknown>;
+  for (const key of Object.keys(chunk)) {
+    if (key === "partial") {
+      continue;
+    }
+    snapshotlessChunk[key] = chunk[key];
+  }
   return utf8JsonByteLength(snapshotlessChunk);
 }
 
@@ -383,23 +391,23 @@ function baseModelCallEvent(
   trace: DiagnosticTraceContext,
   promptStats: ModelCallPromptStats | undefined,
 ): ModelCallEventBase {
-  return {
+  const event: ModelCallEventBase = {
     runId: ctx.runId,
     callId,
-    ...(ctx.sessionKey && { sessionKey: ctx.sessionKey }),
-    ...(ctx.sessionId && { sessionId: ctx.sessionId }),
     provider: ctx.provider,
     model: ctx.model,
-    ...(ctx.api && { api: ctx.api }),
-    ...(ctx.transport && { transport: ctx.transport }),
-    ...(ctx.contextTokenBudget ? { contextTokenBudget: ctx.contextTokenBudget } : {}),
-    ...(ctx.contextWindowSource ? { contextWindowSource: ctx.contextWindowSource } : {}),
-    ...(ctx.contextWindowReferenceTokens
-      ? { contextWindowReferenceTokens: ctx.contextWindowReferenceTokens }
-      : {}),
-    ...(promptStats ? { promptStats } : {}),
     trace,
   };
+  if (ctx.sessionKey) event.sessionKey = ctx.sessionKey;
+  if (ctx.sessionId) event.sessionId = ctx.sessionId;
+  if (ctx.api) event.api = ctx.api;
+  if (ctx.transport) event.transport = ctx.transport;
+  if (ctx.contextTokenBudget) event.contextTokenBudget = ctx.contextTokenBudget;
+  if (ctx.contextWindowSource) event.contextWindowSource = ctx.contextWindowSource;
+  if (ctx.contextWindowReferenceTokens)
+    event.contextWindowReferenceTokens = ctx.contextWindowReferenceTokens;
+  if (promptStats) event.promptStats = promptStats;
+  return event;
 }
 
 function modelContentPrivateData(modelContent: DiagnosticModelCallContent | undefined) {
