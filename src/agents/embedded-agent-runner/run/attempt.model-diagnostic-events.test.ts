@@ -404,6 +404,86 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expect(serializedPartial).not.toHaveBeenCalled();
   });
 
+  it("counts non-delta stream chunks without reading partial snapshots", async () => {
+    const chunk = {
+      type: "metadata",
+      value: "kept",
+    } as Record<string, unknown>;
+    Object.defineProperty(chunk, "partial", {
+      enumerable: true,
+      get() {
+        throw new Error("partial snapshot should not be read for byte accounting");
+      },
+    });
+    async function* stream() {
+      yield chunk;
+    }
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      (() => stream()) as unknown as StreamFn,
+      {
+        runId: "run-1",
+        provider: "openai",
+        model: "gpt-5.4",
+        trace: createDiagnosticTraceContext(),
+        nextCallId: () => "call-nondelta-bytes",
+      },
+    );
+
+    const events = await collectModelCallEvents(async () => {
+      await drain(wrapped({} as never, {} as never, {} as never) as AsyncIterable<unknown>);
+    });
+
+    const completedEvent = getEvent(events, 1);
+    expect(completedEvent.type).toBe("model.call.completed");
+    expect(completedEvent.responseStreamBytes).toBe(
+      Buffer.byteLength(JSON.stringify({ type: "metadata", value: "kept" }), "utf8"),
+    );
+  });
+
+  it("preserves own __proto__ data keys when excluding partial snapshots", async () => {
+    const chunk = Object.assign(Object.create(null), {
+      type: "metadata",
+      value: "kept",
+      partial: { role: "assistant", content: [{ type: "text", text: "ignored" }] },
+    }) as Record<string, unknown>;
+    Object.defineProperty(chunk, "__proto__", {
+      enumerable: true,
+      value: { marker: "data-key" },
+    });
+    async function* stream() {
+      yield chunk;
+    }
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      (() => stream()) as unknown as StreamFn,
+      {
+        runId: "run-1",
+        provider: "openai",
+        model: "gpt-5.4",
+        trace: createDiagnosticTraceContext(),
+        nextCallId: () => "call-proto-data-key",
+      },
+    );
+    const expectedChunk = Object.assign(Object.create(null), {
+      type: "metadata",
+      value: "kept",
+    }) as Record<string, unknown>;
+    Object.defineProperty(expectedChunk, "__proto__", {
+      enumerable: true,
+      value: { marker: "data-key" },
+    });
+
+    const events = await collectModelCallEvents(async () => {
+      await drain(wrapped({} as never, {} as never, {} as never) as AsyncIterable<unknown>);
+    });
+
+    const completedEvent = getEvent(events, 1);
+    expect(completedEvent.type).toBe("model.call.completed");
+    expect(completedEvent.responseStreamBytes).toBe(
+      Buffer.byteLength(JSON.stringify(expectedChunk), "utf8"),
+    );
+    expect((Object.prototype as Record<string, unknown>).marker).toBeUndefined();
+  });
+
   it("keeps streams alive when diagnostic byte inspection cannot read a chunk", async () => {
     const opaqueChunk = new Proxy(
       {},
