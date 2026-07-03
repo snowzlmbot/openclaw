@@ -139,28 +139,71 @@ function streamDeltaByteLength(chunk: Record<string, unknown>): number | undefin
   return undefined;
 }
 
-function utf8JsonObjectByteLengthWithoutOwnKey(
+function canHideOwnPropertyWithProxy(object: Record<string, unknown>, key: string): boolean {
+  const descriptor = Object.getOwnPropertyDescriptor(object, key);
+  return (
+    descriptor === undefined || (descriptor.configurable === true && Object.isExtensible(object))
+  );
+}
+
+function utf8JsonObjectByteLengthWithoutOwnKeyViaProxy(
   object: Record<string, unknown>,
   excludedKey: string,
-): number {
-  let json = "{";
-  let hasEntry = false;
-  for (const key of Object.keys(object)) {
+): number | undefined {
+  const snapshotlessObject = new Proxy(object, {
+    get(target, property, receiver) {
+      if (property === excludedKey) {
+        return undefined;
+      }
+      return Reflect.get(target, property, receiver);
+    },
+    getOwnPropertyDescriptor(target, property) {
+      if (property === excludedKey) {
+        return undefined;
+      }
+      return Reflect.getOwnPropertyDescriptor(target, property);
+    },
+    has(target, property) {
+      if (property === excludedKey) {
+        return false;
+      }
+      return Reflect.has(target, property);
+    },
+    ownKeys(target) {
+      return Reflect.ownKeys(target).filter((property) => property !== excludedKey);
+    },
+  });
+  return utf8JsonByteLength(snapshotlessObject);
+}
+
+function utf8JsonObjectByteLengthWithoutOwnKeyViaSnapshot(
+  object: Record<string, unknown>,
+  excludedKey: string,
+): number | undefined {
+  const snapshotlessObject = Object.create(Object.getPrototypeOf(object)) as Record<
+    string,
+    unknown
+  >;
+  for (const key of Reflect.ownKeys(object)) {
     if (key === excludedKey) {
       continue;
     }
-    const valueJson = JSON.stringify(object[key]);
-    if (valueJson === undefined) {
-      continue;
+    const descriptor = Object.getOwnPropertyDescriptor(object, key);
+    if (descriptor) {
+      Object.defineProperty(snapshotlessObject, key, descriptor);
     }
-    if (hasEntry) {
-      json += ",";
-    }
-    json += `${JSON.stringify(key)}:${valueJson}`;
-    hasEntry = true;
   }
-  json += "}";
-  return Buffer.byteLength(json, "utf8");
+  return utf8JsonByteLength(snapshotlessObject);
+}
+
+function utf8JsonObjectByteLengthWithoutOwnKey(
+  object: Record<string, unknown>,
+  excludedKey: string,
+): number | undefined {
+  if (canHideOwnPropertyWithProxy(object, excludedKey)) {
+    return utf8JsonObjectByteLengthWithoutOwnKeyViaProxy(object, excludedKey);
+  }
+  return utf8JsonObjectByteLengthWithoutOwnKeyViaSnapshot(object, excludedKey);
 }
 
 function responseStreamChunkByteLengthUnchecked(chunk: unknown): number | undefined {
