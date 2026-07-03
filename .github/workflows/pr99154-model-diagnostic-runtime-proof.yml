@@ -1,0 +1,577 @@
+name: PR 99154 model diagnostic runtime proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      head_ref:
+        description: PR head commit or branch to validate
+        required: true
+        default: HEAD_REF_PLACEHOLDER
+        type: string
+      base_ref:
+        description: Base commit used for before comparison
+        required: true
+        default: 28a841472684eed2d98a1a277fcefc30855b580b
+        type: string
+      chunk_count:
+        description: Synthetic stream chunk count
+        required: true
+        default: "50000"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-99154-model-diagnostic-runtime-proof-${{ github.run_id }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  proof:
+    name: Model diagnostic runtime proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.head_ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          install-bun: "false"
+          install-deps: "true"
+          frozen-lockfile: "true"
+          save-actions-cache: "false"
+
+      - name: Write proof harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/pr99154-model-diagnostic-proof.mts" <<'TS'
+          import { performance } from "node:perf_hooks";
+          import { fileURLToPath, pathToFileURL } from "node:url";
+          import path from "node:path";
+
+          type DiagnosticEvent = Record<string, unknown>;
+          type EdgeResult = Record<string, unknown> & { passed: boolean };
+
+          const repoRoot = process.cwd();
+          const repoUrl = pathToFileURL(repoRoot.endsWith(path.sep) ? repoRoot : `${repoRoot}${path.sep}`);
+          const moduleUrl = (rel: string) => new URL(rel, repoUrl).href;
+
+          const { wrapStreamFnWithDiagnosticModelCallEvents } = await import(
+            moduleUrl("src/agents/embedded-agent-runner/run/attempt.model-diagnostic-events.ts")
+          );
+          const {
+            onInternalDiagnosticEvent,
+            resetDiagnosticEventsForTest,
+            setDiagnosticsEnabledForProcess,
+            waitForDiagnosticEventsDrained,
+          } = await import(moduleUrl("src/infra/diagnostic-events.ts"));
+          const { createDiagnosticTraceContext } = await import(
+            moduleUrl("src/infra/diagnostic-trace-context.ts")
+          );
+
+          const chunkCount = Number.parseInt(process.env.CHUNK_COUNT || "50000", 10);
+          const label = process.env.PROOF_LABEL || "unknown";
+          const expectEdgePass = process.env.EXPECT_EDGE_PASS === "true";
+          const commit = process.env.TESTED_SHA || "unknown";
+
+          async function collectModelCallEvents(run: () => Promise<void>): Promise<DiagnosticEvent[]> {
+            const events: DiagnosticEvent[] = [];
+            const stop = onInternalDiagnosticEvent((event: DiagnosticEvent) => {
+              if (String(event.type || "").startsWith("model.call.")) {
+                events.push(event);
+              }
+            });
+            try {
+              await run();
+              await waitForDiagnosticEventsDrained();
+              await new Promise<void>((resolve) => setImmediate(resolve));
+              return events;
+            } finally {
+              stop();
+            }
+          }
+
+          async function drain(stream: AsyncIterable<unknown>): Promise<void> {
+            for await (const _ of stream) {
+              // Drain stream to force completed diagnostics.
+            }
+          }
+
+          function completedEvent(events: DiagnosticEvent[]): DiagnosticEvent {
+            return events.find((event) => event.type === "model.call.completed") || {};
+          }
+
+          function createWrapped(streamFactory: () => AsyncIterable<unknown>, callId: string) {
+            return wrapStreamFnWithDiagnosticModelCallEvents((() => streamFactory()) as never, {
+              runId: `proof-${label}`,
+              provider: "mock-openai",
+              model: "gpt-5.5",
+              trace: createDiagnosticTraceContext(),
+              nextCallId: () => callId,
+            });
+          }
+
+          async function runEdge(name: string, chunk: Record<string, unknown>, expectedBytes: number): Promise<EdgeResult> {
+            resetDiagnosticEventsForTest();
+            setDiagnosticsEnabledForProcess(true);
+            async function* stream() {
+              yield chunk;
+            }
+            const wrapped = createWrapped(() => stream(), `${name}-${label}`);
+            const events = await collectModelCallEvents(async () => {
+              await drain(wrapped({} as never, {} as never, {} as never) as AsyncIterable<unknown>);
+            });
+            const completed = completedEvent(events);
+            const actualBytes = completed.responseStreamBytes;
+            return { passed: actualBytes === expectedBytes, expectedBytes, actualBytes, eventCount: events.length };
+          }
+
+          async function runPartialGetterEdge(): Promise<EdgeResult> {
+            let partialReads = 0;
+            const chunk = { type: "metadata", value: "kept" } as Record<string, unknown>;
+            Object.defineProperty(chunk, "partial", {
+              enumerable: true,
+              get() {
+                partialReads += 1;
+                throw new Error("partial snapshot should not be read for byte accounting");
+              },
+            });
+            const result = await runEdge(
+              "partial-getter",
+              chunk,
+              Buffer.byteLength(JSON.stringify({ type: "metadata", value: "kept" }), "utf8"),
+            );
+            return { ...result, passed: result.passed && partialReads === 0, partialReads };
+          }
+
+          async function runToJsonProxyEdge(): Promise<EdgeResult> {
+            let partialReads = 0;
+            let ignoredReads = 0;
+            const chunk = { type: "metadata", value: "kept" } as Record<string, unknown>;
+            Object.defineProperty(chunk, "ignoredThrowing", {
+              enumerable: true,
+              get() {
+                ignoredReads += 1;
+                throw new Error("toJSON proxy edge should not eagerly read other getters");
+              },
+            });
+            Object.defineProperty(chunk, "partial", {
+              configurable: true,
+              enumerable: true,
+              get() {
+                partialReads += 1;
+                throw new Error("toJSON proxy edge should not read partial");
+              },
+            });
+            Object.defineProperty(chunk, "toJSON", {
+              value() {
+                return {
+                  hasPartial: "partial" in (this as Record<string, unknown>),
+                  ownPartial: Object.prototype.hasOwnProperty.call(this, "partial"),
+                  value: (this as Record<string, unknown>).value,
+                };
+              },
+            });
+            const result = await runEdge(
+              "tojson-proxy",
+              chunk,
+              Buffer.byteLength(
+                JSON.stringify({ hasPartial: false, ownPartial: false, value: "kept" }),
+                "utf8",
+              ),
+            );
+            return { ...result, passed: result.passed && partialReads === 0 && ignoredReads === 0, partialReads, ignoredReads };
+          }
+
+          async function runInheritedToJsonProxyEdge(): Promise<EdgeResult> {
+            const prototype = {};
+            Object.defineProperty(prototype, "toJSON", {
+              value() {
+                return { hasPartial: "partial" in (this as Record<string, unknown>), value: (this as Record<string, unknown>).value };
+              },
+            });
+            const chunk = Object.assign(Object.create(prototype), { type: "metadata", value: "kept" }) as Record<string, unknown>;
+            Object.defineProperty(chunk, "partial", { configurable: true, enumerable: true, value: "ignored" });
+            return runEdge(
+              "tojson-inherited-proxy",
+              chunk,
+              Buffer.byteLength(JSON.stringify({ hasPartial: false, value: "kept" }), "utf8"),
+            );
+          }
+
+          async function runToJsonSnapshotEdge(): Promise<EdgeResult> {
+            let ignoredReads = 0;
+            const chunk = Object.assign(Object.create(null), { type: "metadata", value: "kept" }) as Record<string, unknown>;
+            Object.defineProperty(chunk, "__proto__", { enumerable: true, value: { marker: "data-key" } });
+            Object.defineProperty(chunk, "ignoredThrowing", {
+              enumerable: true,
+              get() {
+                ignoredReads += 1;
+                throw new Error("toJSON snapshot edge should not eagerly read other getters");
+              },
+            });
+            Object.defineProperty(chunk, "partial", {
+              configurable: false,
+              enumerable: true,
+              value: { role: "assistant", content: [{ type: "text", text: "ignored" }] },
+            });
+            Object.defineProperty(chunk, "toJSON", {
+              value() {
+                return {
+                  dataProto: (this as Record<string, unknown>).__proto__,
+                  hasPartial: Object.prototype.hasOwnProperty.call(this, "partial"),
+                };
+              },
+            });
+            const result = await runEdge(
+              "tojson-snapshot",
+              chunk,
+              Buffer.byteLength(JSON.stringify({ dataProto: { marker: "data-key" }, hasPartial: false }), "utf8"),
+            );
+            const objectPrototypeClean = (Object.prototype as Record<string, unknown>).marker === undefined;
+            return { ...result, passed: result.passed && ignoredReads === 0 && objectPrototypeClean, ignoredReads, objectPrototypeClean };
+          }
+
+          async function runProtoDataKeyEdge(): Promise<EdgeResult> {
+            const chunk = Object.assign(Object.create(null), {
+              type: "metadata",
+              value: "kept",
+              partial: { role: "assistant", content: [{ type: "text", text: "ignored" }] },
+            }) as Record<string, unknown>;
+            Object.defineProperty(chunk, "__proto__", { enumerable: true, value: { marker: `data-key-${label}` } });
+            const expectedChunk = Object.assign(Object.create(null), { type: "metadata", value: "kept" }) as Record<string, unknown>;
+            Object.defineProperty(expectedChunk, "__proto__", { enumerable: true, value: { marker: `data-key-${label}` } });
+            const result = await runEdge("proto-data-key", chunk, Buffer.byteLength(JSON.stringify(expectedChunk), "utf8"));
+            const objectPrototypeClean = (Object.prototype as Record<string, unknown>).marker === undefined;
+            return { ...result, passed: result.passed && objectPrototypeClean, objectPrototypeClean };
+          }
+
+          async function runValueToJsonKeyEdge(): Promise<EdgeResult> {
+            const valueToJsonKeys: string[] = [];
+            const keyAwareValue = {
+              toJSON(key: string) {
+                valueToJsonKeys.push(key);
+                return key === "value"
+                  ? { key, mode: "object-property" }
+                  : { key, mode: "root-value" };
+              },
+            };
+            const chunk = {
+              type: "metadata",
+              value: keyAwareValue,
+            } as Record<string, unknown>;
+            Object.defineProperty(chunk, "partial", {
+              enumerable: true,
+              get() {
+                throw new Error("value-level toJSON edge should not read partial");
+              },
+            });
+            const result = await runEdge(
+              "value-tojson-key",
+              chunk,
+              Buffer.byteLength(
+                JSON.stringify({
+                  type: "metadata",
+                  value: { key: "value", mode: "object-property" },
+                }),
+                "utf8",
+              ),
+            );
+            return { ...result, passed: result.passed && valueToJsonKeys.join(",") === "value", valueToJsonKeys };
+          }
+
+          async function runBigIntToJsonKeyEdge(): Promise<EdgeResult> {
+            const originalToJson = Object.getOwnPropertyDescriptor(BigInt.prototype, "toJSON");
+            const valueToJsonKeys: string[] = [];
+            try {
+              Object.defineProperty(BigInt.prototype, "toJSON", {
+                configurable: true,
+                value(key: string) {
+                  valueToJsonKeys.push(key);
+                  return key === "value" ? "object-property-bigint" : "root-bigint";
+                },
+              });
+              const chunk = {
+                type: "metadata",
+                value: 1n,
+              } as Record<string, unknown>;
+              Object.defineProperty(chunk, "partial", {
+                enumerable: true,
+                get() {
+                  throw new Error("BigInt toJSON edge should not read partial");
+                },
+              });
+              const result = await runEdge(
+                "bigint-tojson-key",
+                chunk,
+                Buffer.byteLength(
+                  JSON.stringify({
+                    type: "metadata",
+                    value: "object-property-bigint",
+                  }),
+                  "utf8",
+                ),
+              );
+              return { ...result, passed: result.passed && valueToJsonKeys.join(",") === "value", valueToJsonKeys };
+            } finally {
+              if (originalToJson) {
+                Object.defineProperty(BigInt.prototype, "toJSON", originalToJson);
+              } else {
+                Reflect.deleteProperty(BigInt.prototype, "toJSON");
+              }
+            }
+          }
+
+          async function runLargePartialGetterBenchmark() {
+            resetDiagnosticEventsForTest();
+            setDiagnosticsEnabledForProcess(true);
+            const chunks = Math.min(chunkCount, 10000);
+            const largeText = "x".repeat(20000);
+            let partialReads = 0;
+            let expectedBytes = 0;
+            async function* stream() {
+              for (let index = 0; index < chunks; index += 1) {
+                const chunk = {
+                  type: "metadata",
+                  index,
+                  value: "chunk-" + index,
+                } as Record<string, unknown>;
+                Object.defineProperty(chunk, "partial", {
+                  enumerable: true,
+                  get() {
+                    partialReads += 1;
+                    return {
+                      role: "assistant",
+                      content: [{ type: "text", text: largeText }],
+                    };
+                  },
+                });
+                expectedBytes += Buffer.byteLength(
+                  JSON.stringify({ type: "metadata", index, value: "chunk-" + index }),
+                  "utf8",
+                );
+                yield chunk;
+              }
+            }
+            const wrapped = createWrapped(() => stream(), "large-partial-getter-" + label);
+            if (globalThis.gc) globalThis.gc();
+            const before = process.memoryUsage();
+            const started = performance.now();
+            const events = await collectModelCallEvents(async () => {
+              await drain(wrapped({} as never, {} as never, {} as never) as AsyncIterable<unknown>);
+            });
+            await waitForDiagnosticEventsDrained();
+            if (globalThis.gc) globalThis.gc();
+            const ended = performance.now();
+            const after = process.memoryUsage();
+            const completed = completedEvent(events);
+            const actualBytes = completed.responseStreamBytes;
+            return {
+              chunks,
+              partialReads,
+              expectedBytes,
+              actualBytes,
+              durationMs: Math.round((ended - started) * 100) / 100,
+              rssDeltaBytes: after.rss - before.rss,
+              heapUsedDeltaBytes: after.heapUsed - before.heapUsed,
+              eventCount: events.length,
+              passed: actualBytes === expectedBytes && partialReads === 0,
+            };
+          }
+
+          function makeBenchmarkChunk(index: number): Record<string, unknown> {
+            const chunk = Object.assign(Object.create(null), {
+              type: "metadata",
+              index,
+              value: `chunk-${index}`,
+              partial: { role: "assistant", content: [{ type: "text", text: `answer-so-far-${index}` }] },
+            }) as Record<string, unknown>;
+            if (index % 10 === 0) {
+              Object.defineProperty(chunk, "__proto__", { enumerable: true, value: { marker: `proto-${index}` } });
+            }
+            return chunk;
+          }
+
+          async function runSyntheticStreamBenchmark() {
+            resetDiagnosticEventsForTest();
+            setDiagnosticsEnabledForProcess(true);
+            async function* stream() {
+              for (let index = 0; index < chunkCount; index += 1) {
+                yield makeBenchmarkChunk(index);
+              }
+            }
+            const wrapped = createWrapped(() => stream(), `benchmark-${label}`);
+            if (globalThis.gc) globalThis.gc();
+            const before = process.memoryUsage();
+            const started = performance.now();
+            const events = await collectModelCallEvents(async () => {
+              await drain(wrapped({} as never, {} as never, {} as never) as AsyncIterable<unknown>);
+            });
+            await waitForDiagnosticEventsDrained();
+            if (globalThis.gc) globalThis.gc();
+            const ended = performance.now();
+            const after = process.memoryUsage();
+            const completed = completedEvent(events);
+            return {
+              chunks: chunkCount,
+              durationMs: Math.round((ended - started) * 100) / 100,
+              rssDeltaBytes: after.rss - before.rss,
+              heapUsedDeltaBytes: after.heapUsed - before.heapUsed,
+              responseStreamBytes: completed.responseStreamBytes,
+              eventCount: events.length,
+            };
+          }
+
+          const partialGetterEdge = await runPartialGetterEdge();
+          const toJsonProxyEdge = await runToJsonProxyEdge();
+          const inheritedToJsonProxyEdge = await runInheritedToJsonProxyEdge();
+          const toJsonSnapshotEdge = await runToJsonSnapshotEdge();
+          const protoDataKeyEdge = await runProtoDataKeyEdge();
+          const valueToJsonKeyEdge = await runValueToJsonKeyEdge();
+          const bigIntToJsonKeyEdge = await runBigIntToJsonKeyEdge();
+          const syntheticStreamBenchmark = await runSyntheticStreamBenchmark();
+          const largePartialGetterBenchmark = await runLargePartialGetterBenchmark();
+          const edgeResults = [partialGetterEdge, toJsonProxyEdge, inheritedToJsonProxyEdge, toJsonSnapshotEdge, protoDataKeyEdge, valueToJsonKeyEdge, bigIntToJsonKeyEdge, largePartialGetterBenchmark];
+          const result = {
+            label,
+            commit,
+            node: process.version,
+            script: fileURLToPath(import.meta.url),
+            expectEdgePass,
+            partialGetterEdge,
+            toJsonProxyEdge,
+            inheritedToJsonProxyEdge,
+            toJsonSnapshotEdge,
+            protoDataKeyEdge,
+            valueToJsonKeyEdge,
+            bigIntToJsonKeyEdge,
+            syntheticStreamBenchmark,
+            largePartialGetterBenchmark,
+            passed:
+              (!expectEdgePass || edgeResults.every((edge) => edge.passed)) &&
+              Number.isFinite(Number(syntheticStreamBenchmark.responseStreamBytes)),
+          };
+          console.log(JSON.stringify(result, null, 2));
+          if (!result.passed) process.exitCode = 1;
+          TS
+
+      - name: Run baseline proof comparison
+        id: baseline
+        env:
+          BASE_REF: ${{ inputs.base_ref }}
+          CHUNK_COUNT: ${{ inputs.chunk_count }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/pr99154-proof
+          git fetch --no-tags --depth=1 https://github.com/openclaw/openclaw.git "$BASE_REF"
+          git checkout --force FETCH_HEAD
+          tested_sha="$(git rev-parse HEAD)"
+          set +e
+          CHUNK_COUNT="$CHUNK_COUNT" PROOF_LABEL=baseline EXPECT_EDGE_PASS=false TESTED_SHA="$tested_sha" \
+            node --expose-gc --import tsx "$RUNNER_TEMP/pr99154-model-diagnostic-proof.mts" \
+            > .artifacts/pr99154-proof/baseline.json
+          status=$?
+          set -e
+          if [ "$status" != "0" ]; then
+            echo "Baseline proof harness recorded expected pre-fix edge failures." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "sha=$tested_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Run PR head proof
+        id: head
+        env:
+          HEAD_REF: ${{ inputs.head_ref }}
+          CHUNK_COUNT: ${{ inputs.chunk_count }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$HEAD_REF"
+          git checkout --force FETCH_HEAD
+          tested_sha="$(git rev-parse HEAD)"
+          CHUNK_COUNT="$CHUNK_COUNT" PROOF_LABEL=head EXPECT_EDGE_PASS=true TESTED_SHA="$tested_sha" \
+            node --expose-gc --import tsx "$RUNNER_TEMP/pr99154-model-diagnostic-proof.mts" \
+            > .artifacts/pr99154-proof/head.json
+          echo "sha=$tested_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs');
+          const base = JSON.parse(fs.readFileSync('.artifacts/pr99154-proof/baseline.json', 'utf8'));
+          const head = JSON.parse(fs.readFileSync('.artifacts/pr99154-proof/head.json', 'utf8'));
+          const pct = (before, after) => {
+            if (!Number.isFinite(before) || before === 0 || !Number.isFinite(after)) return 'n/a';
+            const value = ((before - after) / before) * 100;
+            return `${Math.abs(value).toFixed(1)}% ${value >= 0 ? 'lower' : 'higher'} on PR head`;
+          };
+          const edgeLine = (label, edge) => `- ${label}: ${edge.passed} (expected bytes: ${edge.expectedBytes}, actual bytes: ${edge.actualBytes ?? 'undefined'})`;
+          const lines = [
+            '# PR 99154 model diagnostic runtime proof',
+            '',
+            `Generated: ${new Date().toISOString()}`,
+            `Node: ${head.node}`,
+            `Baseline SHA: ${base.commit}`,
+            `PR head SHA: ${head.commit}`,
+            '',
+            '## Edge behavior',
+            '',
+            edgeLine('Baseline partial getter edge passed', base.partialGetterEdge),
+            edgeLine('PR head partial getter edge passed', head.partialGetterEdge),
+            edgeLine('PR head own non-enumerable toJSON proxy edge passed', head.toJsonProxyEdge),
+            edgeLine('PR head inherited toJSON proxy edge passed', head.inheritedToJsonProxyEdge),
+            edgeLine('PR head toJSON snapshot fallback edge passed', head.toJsonSnapshotEdge),
+            edgeLine('PR head own __proto__ data-key edge passed', head.protoDataKeyEdge),
+            edgeLine('PR head value-level toJSON(key) edge passed', head.valueToJsonKeyEdge),
+            edgeLine('PR head BigInt toJSON(key) edge passed', head.bigIntToJsonKeyEdge),
+            '',
+            '## Synthetic stream benchmark',
+            '',
+            `- Chunks: ${head.syntheticStreamBenchmark.chunks}`,
+            `- Baseline duration: ${base.syntheticStreamBenchmark.durationMs} ms`,
+            `- PR head duration: ${head.syntheticStreamBenchmark.durationMs} ms`,
+            `- Duration delta: ${pct(base.syntheticStreamBenchmark.durationMs, head.syntheticStreamBenchmark.durationMs)}`,
+            `- Baseline RSS delta: ${base.syntheticStreamBenchmark.rssDeltaBytes} bytes`,
+            `- PR head RSS delta: ${head.syntheticStreamBenchmark.rssDeltaBytes} bytes`,
+            `- Baseline response stream bytes: ${base.syntheticStreamBenchmark.responseStreamBytes}`,
+            `- PR head response stream bytes: ${head.syntheticStreamBenchmark.responseStreamBytes}`,
+            '',
+            '## Large partial getter benchmark',
+            '',
+            `- Chunks: ${head.largePartialGetterBenchmark.chunks}`,
+            `- Baseline partial reads: ${base.largePartialGetterBenchmark.partialReads}`,
+            `- PR head partial reads: ${head.largePartialGetterBenchmark.partialReads}`,
+            `- Baseline duration: ${base.largePartialGetterBenchmark.durationMs} ms`,
+            `- PR head duration: ${head.largePartialGetterBenchmark.durationMs} ms`,
+            `- Baseline RSS delta: ${base.largePartialGetterBenchmark.rssDeltaBytes} bytes`,
+            `- PR head RSS delta: ${head.largePartialGetterBenchmark.rssDeltaBytes} bytes`,
+            `- Expected/actual bytes on PR head: ${head.largePartialGetterBenchmark.expectedBytes} / ${head.largePartialGetterBenchmark.actualBytes}`,
+            '',
+            '## Conclusion',
+            '',
+            'The PR head preserves diagnostic stream byte accounting without reading accumulated partial snapshots, preserves callable toJSON behavior for own non-enumerable and inherited methods, keeps lazy getters lazy before toJSON, preserves own enumerable __proto__ data keys, and completes the synthetic model-call stream workload successfully.',
+            '',
+          ];
+          fs.writeFileSync('.artifacts/pr99154-proof/summary.md', `${lines.join('\n')}\n`);
+          console.log(lines.join('\n'));
+          NODE
+          cat .artifacts/pr99154-proof/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload proof artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pr99154-model-diagnostic-runtime-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/pr99154-proof
+          if-no-files-found: error
