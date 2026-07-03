@@ -139,28 +139,131 @@ function streamDeltaByteLength(chunk: Record<string, unknown>): number | undefin
   return undefined;
 }
 
-function utf8JsonObjectByteLengthWithoutOwnKey(
+type PlainJsonPropertyValue = { json: string; kind: "value" } | { kind: "omit" | "fallback" };
+
+function plainJsonPropertyValue(value: unknown): PlainJsonPropertyValue {
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "boolean":
+      return { kind: "value", json: JSON.stringify(value) ?? "null" };
+    case "undefined":
+    case "symbol":
+      return { kind: "omit" };
+    case "object":
+      return value === null ? { kind: "value", json: "null" } : { kind: "fallback" };
+    case "bigint":
+    case "function":
+      return { kind: "fallback" };
+  }
+  return { kind: "fallback" };
+}
+
+function utf8JsonPlainDataObjectByteLengthWithoutOwnKey(
   object: Record<string, unknown>,
   excludedKey: string,
-): number {
+): number | undefined {
+  // Keep the fast path limited to plain data values; anything with JSON hooks,
+  // accessors, or nested object semantics falls back to JSON.stringify below.
+  if ("toJSON" in object) {
+    return undefined;
+  }
   let json = "{";
   let hasEntry = false;
   for (const key of Object.keys(object)) {
     if (key === excludedKey) {
       continue;
     }
-    const valueJson = JSON.stringify(object[key]);
-    if (valueJson === undefined) {
+    const descriptor = Object.getOwnPropertyDescriptor(object, key);
+    if (!descriptor || !("value" in descriptor)) {
+      return undefined;
+    }
+    const propertyValue = plainJsonPropertyValue(descriptor.value);
+    if (propertyValue.kind === "fallback") {
+      return undefined;
+    }
+    if (propertyValue.kind === "omit") {
       continue;
     }
     if (hasEntry) {
       json += ",";
     }
-    json += `${JSON.stringify(key)}:${valueJson}`;
+    json += `${JSON.stringify(key)}:${propertyValue.json}`;
     hasEntry = true;
   }
   json += "}";
   return Buffer.byteLength(json, "utf8");
+}
+
+function canHideOwnPropertyWithProxy(object: Record<string, unknown>, key: string): boolean {
+  const descriptor = Object.getOwnPropertyDescriptor(object, key);
+  return (
+    descriptor === undefined || (descriptor.configurable === true && Object.isExtensible(object))
+  );
+}
+
+function utf8JsonObjectByteLengthWithoutOwnKeyViaProxy(
+  object: Record<string, unknown>,
+  excludedKey: string,
+): number | undefined {
+  const snapshotlessObject = new Proxy(object, {
+    get(target, property, receiver) {
+      if (property === excludedKey) {
+        return undefined;
+      }
+      return Reflect.get(target, property, receiver);
+    },
+    getOwnPropertyDescriptor(target, property) {
+      if (property === excludedKey) {
+        return undefined;
+      }
+      return Reflect.getOwnPropertyDescriptor(target, property);
+    },
+    has(target, property) {
+      if (property === excludedKey) {
+        return false;
+      }
+      return Reflect.has(target, property);
+    },
+    ownKeys(target) {
+      return Reflect.ownKeys(target).filter((property) => property !== excludedKey);
+    },
+  });
+  return utf8JsonByteLength(snapshotlessObject);
+}
+
+function utf8JsonObjectByteLengthWithoutOwnKeyViaSnapshot(
+  object: Record<string, unknown>,
+  excludedKey: string,
+): number | undefined {
+  const snapshotlessObject = Object.create(Object.getPrototypeOf(object)) as Record<
+    string,
+    unknown
+  >;
+  for (const key of Reflect.ownKeys(object)) {
+    if (key === excludedKey) {
+      continue;
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(object, key);
+    if (descriptor) {
+      Object.defineProperty(snapshotlessObject, key, descriptor);
+    }
+  }
+  return utf8JsonByteLength(snapshotlessObject);
+}
+
+function utf8JsonObjectByteLengthWithoutOwnKey(
+  object: Record<string, unknown>,
+  excludedKey: string,
+): number | undefined {
+  const plainDataBytes = utf8JsonPlainDataObjectByteLengthWithoutOwnKey(object, excludedKey);
+  if (plainDataBytes !== undefined) {
+    return plainDataBytes;
+  }
+  if (canHideOwnPropertyWithProxy(object, excludedKey)) {
+    return utf8JsonObjectByteLengthWithoutOwnKeyViaProxy(object, excludedKey);
+  }
+  return utf8JsonObjectByteLengthWithoutOwnKeyViaSnapshot(object, excludedKey);
 }
 
 function responseStreamChunkByteLengthUnchecked(chunk: unknown): number | undefined {
