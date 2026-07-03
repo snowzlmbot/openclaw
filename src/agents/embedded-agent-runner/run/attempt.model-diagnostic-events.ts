@@ -146,10 +146,16 @@ function utf8JsonObjectByteLengthWithoutOwnKey(
   let json = "{";
   let hasEntry = false;
   for (const key of Object.keys(object)) {
-    if (key === excludedKey) continue;
+    if (key === excludedKey) {
+      continue;
+    }
     const valueJson = JSON.stringify(object[key]);
-    if (valueJson === undefined) continue;
-    if (hasEntry) json += ",";
+    if (valueJson === undefined) {
+      continue;
+    }
+    if (hasEntry) {
+      json += ",";
+    }
     json += `${JSON.stringify(key)}:${valueJson}`;
     hasEntry = true;
   }
@@ -158,8 +164,16 @@ function utf8JsonObjectByteLengthWithoutOwnKey(
 }
 
 function responseStreamChunkByteLengthUnchecked(chunk: unknown): number | undefined {
-  if (!isRecord(chunk)) return utf8JsonByteLength(chunk);
-  if (!("partial" in chunk)) return utf8JsonByteLength(chunk);
+  if (!isRecord(chunk)) {
+    return utf8JsonByteLength(chunk);
+  }
+  const deltaBytes = streamDeltaByteLength(chunk);
+  if (deltaBytes !== undefined) {
+    return deltaBytes;
+  }
+  if (!("partial" in chunk)) {
+    return utf8JsonByteLength(chunk);
+  }
   return utf8JsonObjectByteLengthWithoutOwnKey(chunk, "partial");
 }
 
