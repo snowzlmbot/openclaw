@@ -66,7 +66,12 @@ import {
   resolveGatewayConfigPath,
   resolveGatewayConfigRestartWriteResult,
 } from "./config-write-flow.js";
-import type { GatewayRequestContext, GatewayRequestHandlers, RespondFn } from "./types.js";
+import type {
+  GatewayRequestContext,
+  GatewayRequestHandlerOptions,
+  GatewayRequestHandlers,
+  RespondFn,
+} from "./types.js";
 import { assertValidParams } from "./validation.js";
 
 const MAX_CONFIG_ISSUES_IN_ERROR_MESSAGE = 3;
@@ -688,7 +693,252 @@ function loadSchemaWithPlugins(): ConfigSchemaResponse {
   return response;
 }
 
+type ModelConfigWriteParams = {
+  provider: string;
+  modelId: string;
+  name?: string;
+};
+
+function readModelConfigWriteParams(
+  params: unknown,
+  requestName: string,
+  respond: RespondFn,
+): ModelConfigWriteParams | null {
+  if (!isRecord(params)) {
+    respond(
+      false,
+      undefined,
+      errorShape(ErrorCodes.INVALID_REQUEST, `invalid ${requestName} params`),
+    );
+    return null;
+  }
+  const provider = typeof params.provider === "string" ? params.provider.trim().toLowerCase() : "";
+  const modelId = typeof params.modelId === "string" ? params.modelId.trim() : "";
+  const name = typeof params.name === "string" ? params.name.trim() : "";
+  if (!provider || !modelId) {
+    respond(
+      false,
+      undefined,
+      errorShape(
+        ErrorCodes.INVALID_REQUEST,
+        `invalid ${requestName} params: provider and modelId are required`,
+      ),
+    );
+    return null;
+  }
+  return { provider, modelId, ...(name ? { name } : {}) };
+}
+
+function mutableRecord(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? { ...value } : {};
+}
+
+function cloneModelEntry(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) ? { ...value } : null;
+}
+
+function applyConfigureModelToSourceConfig(
+  sourceConfig: OpenClawConfig,
+  params: ModelConfigWriteParams,
+): OpenClawConfig {
+  const nextConfig = structuredClone(sourceConfig) as Record<string, unknown>;
+  const models = mutableRecord(nextConfig.models);
+  const providers = mutableRecord(models.providers);
+  const providerConfig = mutableRecord(providers[params.provider]);
+  const currentModels = Array.isArray(providerConfig.models) ? providerConfig.models : [];
+  let replaced = false;
+  const nextModels = currentModels.map((entry) => {
+    const cloned = cloneModelEntry(entry);
+    if (!cloned || cloned.id !== params.modelId) {
+      return entry;
+    }
+    replaced = true;
+    cloned.id = params.modelId;
+    cloned.name = params.name ?? params.modelId;
+    return cloned;
+  });
+  if (!replaced) {
+    nextModels.push({ id: params.modelId, name: params.name ?? params.modelId });
+  }
+  providerConfig.models = nextModels;
+  providers[params.provider] = providerConfig;
+  models.providers = providers;
+  nextConfig.models = models;
+  return nextConfig as OpenClawConfig;
+}
+
+function applyRemoveModelToSourceConfig(
+  sourceConfig: OpenClawConfig,
+  params: ModelConfigWriteParams,
+): { config: OpenClawConfig; removed: boolean } {
+  const nextConfig = structuredClone(sourceConfig) as Record<string, unknown>;
+  const models = mutableRecord(nextConfig.models);
+  const providers = mutableRecord(models.providers);
+  const providerConfig = mutableRecord(providers[params.provider]);
+  const currentModels = Array.isArray(providerConfig.models) ? providerConfig.models : [];
+  let removed = false;
+  const nextModels = currentModels.filter((entry) => {
+    const cloned = cloneModelEntry(entry);
+    const keep = !cloned || cloned.id !== params.modelId;
+    if (!keep) {
+      removed = true;
+    }
+    return keep;
+  });
+  if (!removed) {
+    return { config: sourceConfig, removed: false };
+  }
+  providerConfig.models = nextModels;
+  providers[params.provider] = providerConfig;
+  models.providers = providers;
+  nextConfig.models = models;
+  return { config: nextConfig as OpenClawConfig, removed: true };
+}
+
+async function commitModelConfigSourceWrite(params: {
+  requestParams: unknown;
+  snapshot: Awaited<ReturnType<typeof readConfigFileSnapshotForWrite>>["snapshot"];
+  writeOptions: Awaited<ReturnType<typeof readConfigFileSnapshotForWrite>>["writeOptions"];
+  nextConfig: OpenClawConfig;
+  client: GatewayRequestHandlerOptions["client"];
+  context: GatewayRequestContext | undefined;
+  respond: RespondFn;
+}): Promise<void> {
+  const schema = loadSchemaWithPlugins();
+  const sourceValidated = validateConfigObjectRawWithPlugins(params.nextConfig);
+  if (!sourceValidated.ok) {
+    params.respond(
+      false,
+      undefined,
+      errorShape(
+        ErrorCodes.INVALID_REQUEST,
+        summarizeConfigValidationIssues(sourceValidated.issues),
+        { details: { issues: sourceValidated.issues } },
+      ),
+    );
+    return;
+  }
+  const validated = validateConfigObjectWithPlugins(params.nextConfig);
+  if (!validated.ok) {
+    params.respond(
+      false,
+      undefined,
+      errorShape(ErrorCodes.INVALID_REQUEST, summarizeConfigValidationIssues(validated.issues), {
+        details: { issues: validated.issues },
+      }),
+    );
+    return;
+  }
+  const preparedSecretsSnapshot = await ensureResolvableSecretRefsOrRespond({
+    config: validated.config,
+    respond: params.respond,
+  });
+  if (!preparedSecretsSnapshot) {
+    return;
+  }
+  const changedPaths = diffConfigPaths(params.snapshot.config, validated.config);
+  const actor = resolveControlPlaneActor(params.client);
+  if (changedPaths.length === 0) {
+    respondConfigPatchNoop({
+      snapshot: params.snapshot,
+      config: validated.config,
+      uiHints: schema.uiHints,
+      actor,
+      context: params.context,
+      respond: params.respond,
+    });
+    return;
+  }
+  params.context?.logGateway?.info(
+    `models config write ${formatControlPlaneActor(actor)} changedPaths=${summarizeChangedPaths(
+      changedPaths,
+    )} restartReason=models.config`,
+  );
+  const disconnectSharedAuthClients = shouldDisconnectSharedAuthClientsForConfigWrite({
+    prevConfig: params.snapshot.config,
+    nextConfig: validated.config,
+    preparedSecretsSnapshot,
+  });
+  const writeResult = await commitGatewayConfigWrite({
+    snapshot: params.snapshot,
+    writeOptions: params.writeOptions,
+    nextConfig: params.nextConfig,
+    context: params.context,
+    disconnectSharedAuthClients,
+  });
+  clearConfigSchemaResponseCache();
+  await respondWithConfigRestartWrite({
+    requestParams: params.requestParams,
+    kind: "config-patch",
+    mode: "config.patch",
+    writeResult,
+    changedPaths,
+    actor,
+    context: params.context,
+    respond: params.respond,
+    uiHints: schema.uiHints,
+  });
+}
+
 export const configHandlers: GatewayRequestHandlers = {
+  "models.configure": async ({ params, respond, client, context }) => {
+    const modelParams = readModelConfigWriteParams(params, "models.configure", respond);
+    if (!modelParams) {
+      return;
+    }
+    const writeSnapshot = await readConfigWriteSnapshotOrRespond(params, respond);
+    if (!writeSnapshot) {
+      return;
+    }
+    const { snapshot, writeOptions } = writeSnapshot;
+    const nextConfig = applyConfigureModelToSourceConfig(snapshot.sourceConfig, modelParams);
+    await commitModelConfigSourceWrite({
+      requestParams: params,
+      snapshot,
+      writeOptions,
+      nextConfig,
+      client,
+      context,
+      respond,
+    });
+  },
+  "models.remove": async ({ params, respond, client, context }) => {
+    const modelParams = readModelConfigWriteParams(params, "models.remove", respond);
+    if (!modelParams) {
+      return;
+    }
+    const writeSnapshot = await readConfigWriteSnapshotOrRespond(params, respond);
+    if (!writeSnapshot) {
+      return;
+    }
+    const { snapshot, writeOptions } = writeSnapshot;
+    const { config: nextConfig, removed } = applyRemoveModelToSourceConfig(
+      snapshot.sourceConfig,
+      modelParams,
+    );
+    if (!removed) {
+      respond(
+        true,
+        {
+          ok: true,
+          noop: true,
+          removed: false,
+          message: `${modelParams.provider}/${modelParams.modelId} is not stored in provider config.`,
+        },
+        undefined,
+      );
+      return;
+    }
+    await commitModelConfigSourceWrite({
+      requestParams: params,
+      snapshot,
+      writeOptions,
+      nextConfig,
+      client,
+      context,
+      respond,
+    });
+  },
   "config.get": async ({ params, respond }) => {
     if (!assertValidParams(params, validateConfigGetParams, "config.get", respond)) {
       return;

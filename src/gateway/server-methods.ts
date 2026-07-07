@@ -453,6 +453,8 @@ export const coreGatewayHandlers: GatewayRequestHandlers = {
       "config.get",
       "config.schema",
       "config.schema.lookup",
+      "models.configure",
+      "models.remove",
       "config.set",
       "config.patch",
       "config.apply",

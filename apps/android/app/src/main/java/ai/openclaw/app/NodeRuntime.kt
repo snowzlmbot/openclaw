@@ -655,6 +655,10 @@ class NodeRuntime private constructor(
   val modelCatalogRefreshing: StateFlow<Boolean> = _modelCatalogRefreshing.asStateFlow()
   private val _modelCatalogErrorText = MutableStateFlow<String?>(null)
   val modelCatalogErrorText: StateFlow<String?> = _modelCatalogErrorText.asStateFlow()
+  private val _modelConfigActionState = MutableStateFlow(GatewayModelConfigActionState())
+  val modelConfigActionState: StateFlow<GatewayModelConfigActionState> = _modelConfigActionState.asStateFlow()
+  private val _modelTestResults = MutableStateFlow<Map<String, GatewayModelTestResult>>(emptyMap())
+  val modelTestResults: StateFlow<Map<String, GatewayModelTestResult>> = _modelTestResults.asStateFlow()
   private val _talkSetupReadiness = MutableStateFlow(GatewayTalkSetupReadiness.unverified())
   val talkSetupReadiness: StateFlow<GatewayTalkSetupReadiness> = _talkSetupReadiness.asStateFlow()
   private val _gatewayDefaultAgentId = MutableStateFlow<String?>(null)
@@ -827,6 +831,8 @@ class NodeRuntime private constructor(
     _modelAuthProviders.value = emptyList()
     _modelCatalogRefreshing.value = false
     _modelCatalogErrorText.value = null
+    _modelConfigActionState.value = GatewayModelConfigActionState()
+    _modelTestResults.value = emptyMap()
     _talkSetupReadiness.value = GatewayTalkSetupReadiness.unverified()
     _cronStatus.value = GatewayCronStatus(enabled = false, jobs = 0, nextWakeAtMs = null)
     _cronJobs.value = emptyList()
@@ -1294,6 +1300,38 @@ class NodeRuntime private constructor(
   fun refreshModelCatalog() {
     scope.launch {
       refreshModelCatalogFromGateway()
+    }
+  }
+
+  fun clearModelConfigMessage() {
+    _modelConfigActionState.value = _modelConfigActionState.value.copy(message = null)
+  }
+
+  fun configureModel(
+    provider: String,
+    modelId: String,
+    displayName: String?,
+  ) {
+    scope.launch {
+      configureModelOnGateway(provider = provider, modelId = modelId, displayName = displayName)
+    }
+  }
+
+  fun removeConfiguredModel(
+    provider: String,
+    modelId: String,
+  ) {
+    scope.launch {
+      removeConfiguredModelFromGateway(provider = provider, modelId = modelId)
+    }
+  }
+
+  fun testConfiguredModel(
+    provider: String,
+    modelId: String,
+  ) {
+    scope.launch {
+      testConfiguredModelAvailability(provider = provider, modelId = modelId)
     }
   }
 
@@ -3366,7 +3404,7 @@ class NodeRuntime private constructor(
       return
     }
     try {
-      val modelsRes = requestGatewayData(gatewayScope, "models.list", "{}")
+      val modelsRes = requestGatewayData(gatewayScope, "models.list", """{"view":"provider-config"}""")
       val modelsRoot = json.parseToJsonElement(modelsRes).asObjectOrNull()
       val models = parseGatewayModels(modelsRoot?.get("models") as? JsonArray)
       val authRes = requestGatewayData(gatewayScope, "models.authStatus", "{}")
@@ -3380,6 +3418,155 @@ class NodeRuntime private constructor(
       publishGatewayData(gatewayScope) { _modelCatalogErrorText.value = "Could not load provider catalog." }
     } finally {
       publishGatewayData(gatewayScope) { _modelCatalogRefreshing.value = false }
+    }
+  }
+
+  private suspend fun readGatewayConfigSnapshot(gatewayScope: GatewayDataScope): GatewayConfigSnapshot {
+    val res = requestGatewayData(gatewayScope, "config.get", "{}")
+    val root = json.parseToJsonElement(res).asObjectOrNull()
+    val hash =
+      root
+        ?.get("hash")
+        .asStringOrNull()
+        ?.trim()
+        .orEmpty()
+    if (hash.isEmpty()) throw IllegalStateException("Gateway config hash unavailable.")
+    return GatewayConfigSnapshot(hash = hash)
+  }
+
+  private suspend fun configureModelOnGateway(
+    provider: String,
+    modelId: String,
+    displayName: String?,
+  ) {
+    val gatewayScope = captureGatewayDataScope() ?: return
+    val providerId = provider.trim().lowercase()
+    val id = modelId.trim()
+    val name = displayName?.trim().orEmpty().ifEmpty { id }
+    if (providerId.isEmpty() || id.isEmpty()) {
+      _modelConfigActionState.value = GatewayModelConfigActionState(message = "Provider and model ID are required.")
+      return
+    }
+    publishGatewayData(gatewayScope) { _modelConfigActionState.value = GatewayModelConfigActionState(inFlight = true) }
+    try {
+      val snapshot = readGatewayConfigSnapshot(gatewayScope)
+      val params =
+        buildJsonObject {
+          put("provider", JsonPrimitive(providerId))
+          put("modelId", JsonPrimitive(id))
+          put("name", JsonPrimitive(name))
+          put("baseHash", JsonPrimitive(snapshot.hash))
+        }
+      requestGatewayData(gatewayScope, "models.configure", params.toString())
+      publishGatewayData(gatewayScope) {
+        _modelConfigActionState.value = GatewayModelConfigActionState(message = "Configured $providerId/$id.")
+      }
+      refreshModelCatalogFromGateway()
+    } catch (error: CancellationException) {
+      throw error
+    } catch (_: Throwable) {
+      publishGatewayData(gatewayScope) {
+        _modelConfigActionState.value = GatewayModelConfigActionState(message = "Could not configure model.")
+      }
+    }
+  }
+
+  private suspend fun removeConfiguredModelFromGateway(
+    provider: String,
+    modelId: String,
+  ) {
+    val gatewayScope = captureGatewayDataScope() ?: return
+    val providerId = provider.trim().lowercase()
+    val id = modelId.trim()
+    if (providerId.isEmpty() || id.isEmpty()) return
+    publishGatewayData(gatewayScope) { _modelConfigActionState.value = GatewayModelConfigActionState(inFlight = true) }
+    try {
+      val snapshot = readGatewayConfigSnapshot(gatewayScope)
+      val params =
+        buildJsonObject {
+          put("provider", JsonPrimitive(providerId))
+          put("modelId", JsonPrimitive(id))
+          put("baseHash", JsonPrimitive(snapshot.hash))
+        }
+      val res = requestGatewayData(gatewayScope, "models.remove", params.toString())
+      val resultMessage =
+        json
+          .parseToJsonElement(res)
+          .asObjectOrNull()
+          ?.get("message")
+          .asStringOrNull()
+      publishGatewayData(gatewayScope) {
+        _modelConfigActionState.value = GatewayModelConfigActionState(message = resultMessage ?: "Removed $providerId/$id.")
+      }
+      refreshModelCatalogFromGateway()
+    } catch (error: CancellationException) {
+      throw error
+    } catch (_: Throwable) {
+      publishGatewayData(gatewayScope) {
+        _modelConfigActionState.value = GatewayModelConfigActionState(message = "Could not remove model.")
+      }
+    }
+  }
+
+  private suspend fun testConfiguredModelAvailability(
+    provider: String,
+    modelId: String,
+  ) {
+    val gatewayScope = captureGatewayDataScope() ?: return
+    val providerId = provider.trim().lowercase()
+    val id = modelId.trim()
+    if (providerId.isEmpty() || id.isEmpty()) return
+    val key = modelResultKey(providerId, id)
+    publishGatewayData(gatewayScope) {
+      val result =
+        GatewayModelTestResult(
+          provider = providerId,
+          modelId = id,
+          available = null,
+          status = "Checking...",
+          checkedAtMs = System.currentTimeMillis(),
+        )
+      _modelTestResults.value = _modelTestResults.value + (key to result)
+    }
+    try {
+      val modelsRes = requestGatewayData(gatewayScope, "models.list", """{"view":"all"}""")
+      val modelsRoot = json.parseToJsonElement(modelsRes).asObjectOrNull()
+      val match =
+        parseGatewayModels(modelsRoot?.get("models") as? JsonArray).firstOrNull {
+          it.provider.equals(providerId, ignoreCase = true) && it.id == id
+        }
+      val available = match?.available
+      val status =
+        when {
+          match == null -> "Not returned by Gateway"
+          available == true -> "Available"
+          else -> "Unavailable"
+        }
+      publishGatewayData(gatewayScope) {
+        val result =
+          GatewayModelTestResult(
+            provider = providerId,
+            modelId = id,
+            available = available ?: false,
+            status = status,
+            checkedAtMs = System.currentTimeMillis(),
+          )
+        _modelTestResults.value = _modelTestResults.value + (key to result)
+      }
+    } catch (error: CancellationException) {
+      throw error
+    } catch (_: Throwable) {
+      publishGatewayData(gatewayScope) {
+        val result =
+          GatewayModelTestResult(
+            provider = providerId,
+            modelId = id,
+            available = false,
+            status = "Check failed",
+            checkedAtMs = System.currentTimeMillis(),
+          )
+        _modelTestResults.value = _modelTestResults.value + (key to result)
+      }
     }
   }
 
@@ -4615,6 +4802,23 @@ data class GatewayModelSummary(
   val contextTokens: Long?,
 )
 
+data class GatewayModelConfigActionState(
+  val inFlight: Boolean = false,
+  val message: String? = null,
+)
+
+data class GatewayModelTestResult(
+  val provider: String,
+  val modelId: String,
+  val available: Boolean?,
+  val status: String,
+  val checkedAtMs: Long,
+)
+
+private data class GatewayConfigSnapshot(
+  val hash: String,
+)
+
 internal fun parseGatewayModels(models: JsonArray?): List<GatewayModelSummary> =
   models
     ?.mapNotNull { item ->
@@ -4642,6 +4846,11 @@ data class GatewayModelProviderSummary(
   val status: String,
   val profileCount: Int,
 )
+
+internal fun modelResultKey(
+  provider: String,
+  modelId: String,
+): String = "${provider.trim().lowercase()}/${modelId.trim()}"
 
 data class GatewayCronStatus(
   val enabled: Boolean,

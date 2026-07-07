@@ -26,11 +26,13 @@ import {
 import type { ModelCatalogEntry } from "../../agents/model-catalog.types.js";
 import { resolveCliRuntimeExecutionProvider } from "../../agents/model-runtime-aliases.js";
 import { resolveDefaultAgentWorkspaceDir } from "../../agents/workspace.js";
+import { readConfigFileSnapshot } from "../../config/config.js";
+import type { ModelDefinitionConfig, ModelProviderConfig } from "../../config/types.models.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { isSecretRef } from "../../config/types.secrets.js";
 import type { GatewayRequestContext } from "./types.js";
 
-type ModelsListView = ModelCatalogBrowseView;
+type ModelsListView = ModelCatalogBrowseView | "provider-config";
 type ModelsListEntry = ModelCatalogEntry & { available?: boolean };
 type ModelsListAvailability = boolean | undefined;
 type ModelsListProviderAuthChecker = (
@@ -55,6 +57,57 @@ function omitRuntimeModelParams(entry: ModelCatalogEntry): ModelCatalogEntry {
     params?: Record<string, unknown>;
   };
   return rest;
+}
+
+function configuredProviderCatalogEntry(params: {
+  provider: string;
+  providerConfig: ModelProviderConfig;
+  model: ModelDefinitionConfig;
+}): ModelCatalogEntry {
+  const entry: ModelCatalogEntry = {
+    id: params.model.id,
+    name: params.model.name || params.model.id,
+    provider: params.provider,
+    reasoning: params.model.reasoning,
+    input: params.model.input,
+  };
+  const api = params.model.api ?? params.providerConfig.api;
+  const contextWindow = params.model.contextWindow ?? params.providerConfig.contextWindow;
+  const contextTokens = params.model.contextTokens ?? params.providerConfig.contextTokens;
+  if (api) {
+    entry.api = api;
+  }
+  if (contextWindow !== undefined) {
+    entry.contextWindow = contextWindow;
+  }
+  if (contextTokens !== undefined) {
+    entry.contextTokens = contextTokens;
+  }
+  if (params.model.params) {
+    entry.params = params.model.params;
+  }
+  if (params.model.compat) {
+    entry.compat = params.model.compat;
+  }
+  if (params.model.mediaInput) {
+    entry.mediaInput = params.model.mediaInput;
+  }
+  return entry;
+}
+
+function buildProviderConfigModelCatalog(cfg: OpenClawConfig): ModelCatalogEntry[] {
+  return Object.entries(cfg.models?.providers ?? {})
+    .flatMap(([provider, providerConfig]) =>
+      (providerConfig.models ?? []).map((model) =>
+        configuredProviderCatalogEntry({ provider, providerConfig, model }),
+      ),
+    )
+    .toSorted(
+      (a, b) =>
+        a.provider.localeCompare(b.provider) ||
+        a.name.localeCompare(b.name) ||
+        a.id.localeCompare(b.id),
+    );
 }
 
 function createInFlightProviderAuthChecker(
@@ -280,6 +333,17 @@ export async function buildModelsListResult(params: {
   const agentId = params.agentId ?? resolveDefaultAgentId(cfg);
   const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId) ?? resolveDefaultAgentWorkspaceDir();
   const view = resolveModelsListView(params.params);
+  if (view === "provider-config") {
+    const sourceSnapshot = await readConfigFileSnapshot();
+    return {
+      models: await buildPublicModelsListEntries({
+        catalog: buildProviderConfigModelCatalog(sourceSnapshot.sourceConfig),
+        cfg,
+        agentId,
+        workspaceDir,
+      }),
+    };
+  }
   const catalog = await loadModelCatalogForBrowse({
     cfg,
     view,

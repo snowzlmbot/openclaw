@@ -241,7 +241,12 @@ export const AgentsFilesSetResultSchema = Type.Object(
 export const ModelsListParamsSchema = Type.Object(
   {
     view: Type.Optional(
-      Type.Union([Type.Literal("default"), Type.Literal("configured"), Type.Literal("all")]),
+      Type.Union([
+        Type.Literal("default"),
+        Type.Literal("configured"),
+        Type.Literal("provider-config"),
+        Type.Literal("all"),
+      ]),
     ),
   },
   { additionalProperties: false },

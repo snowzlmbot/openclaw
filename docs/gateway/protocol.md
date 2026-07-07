@@ -687,6 +687,11 @@ context.
   `provider/*` entries. Without an allowlist, the response uses explicit
   `models.providers.<provider>.models` entries, falling back to the full
   catalog only when no configured model rows exist.
+- `"provider-config"`: source-aware provider model management view. The
+  response contains only model rows explicitly authored under
+  `models.providers.<provider>.models`; it does not include
+  `agents.defaults.models` allowlist-only rows. Use this for UIs that add,
+  update, or remove provider model definitions.
 - `"all"`: full gateway catalog, bypassing `agents.defaults.models`. Use for
   diagnostics/discovery UIs, not normal model pickers.
 

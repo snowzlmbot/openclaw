@@ -147,7 +147,7 @@
     },
     {
       "kind": "ui-state-text",
-      "line": 217,
+      "line": 219,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/MainViewModel.kt",
       "source": "Mic off",
       "surface": "android",
@@ -155,7 +155,7 @@
     },
     {
       "kind": "ui-state-text",
-      "line": 227,
+      "line": 229,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/MainViewModel.kt",
       "source": "Off",
       "surface": "android",
@@ -203,7 +203,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 2714,
+      "line": 2752,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "Failed: no secure gateway endpoint was detected. Enable gateway TLS or Tailscale Serve, or use a trusted private LAN address with Unencrypted selected.",
       "surface": "android",
@@ -211,7 +211,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 2716,
+      "line": 2754,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "Failed: secure endpoint reached, but TLS fingerprint verification timed out. Check Tailscale Serve or gateway TLS and retry.",
       "surface": "android",
@@ -219,7 +219,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 2718,
+      "line": 2756,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "Failed: couldn't reach the secure gateway endpoint for this host.",
       "surface": "android",
@@ -2362,8 +2362,32 @@
       "id": "native.android.cf8344d3562e28e3"
     },
     {
-      "kind": "ui-named-argument",
+      "kind": "ui-call",
+      "line": 85,
+      "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
+      "source": "Remove model",
+      "surface": "android",
+      "id": "native.android.c05fc5f151af0340"
+    },
+    {
+      "kind": "ui-call",
       "line": 86,
+      "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
+      "source": "Remove ${model.provider}/${model.id} from provider model config?",
+      "surface": "android",
+      "id": "native.android.d16a4d6fb8c9fd97"
+    },
+    {
+      "kind": "ui-call",
+      "line": 100,
+      "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
+      "source": "Cancel",
+      "surface": "android",
+      "id": "native.android.36486e7c6f3abbf5"
+    },
+    {
+      "kind": "ui-named-argument",
+      "line": 123,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "Back",
       "surface": "android",
@@ -2371,7 +2395,7 @@
     },
     {
       "kind": "ui-named-argument",
-      "line": 89,
+      "line": 126,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "Providers & Models",
       "surface": "android",
@@ -2379,31 +2403,31 @@
     },
     {
       "kind": "ui-named-argument",
-      "line": 91,
+      "line": 128,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
-      "source": "Review provider readiness\nand configured models.",
+      "source": "Review provider-configured model IDs and availability.",
       "surface": "android",
-      "id": "native.android.8eb76aa712ea142a"
+      "id": "native.android.d83bd857a54eb17e"
     },
     {
       "kind": "ui-named-argument",
-      "line": 110,
+      "line": 157,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
-      "source": "Connected providers",
+      "source": "Provider-configured models",
       "surface": "android",
-      "id": "native.android.0a5b541f486e6760"
+      "id": "native.android.2613c02cd677a439"
     },
     {
       "kind": "ui-named-argument",
-      "line": 115,
+      "line": 162,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
-      "source": "Connect your Gateway to load provider readiness.",
+      "source": "Connect your Gateway to load provider model config.",
       "surface": "android",
-      "id": "native.android.c76ebb6f80eaad93"
+      "id": "native.android.32fb1449cefd02d9"
     },
     {
       "kind": "ui-named-argument",
-      "line": 115,
+      "line": 162,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "Gateway offline",
       "surface": "android",
@@ -2411,7 +2435,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 154,
+      "line": 227,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "Needs attention",
       "surface": "android",
@@ -2419,7 +2443,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 210,
+      "line": 278,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "Loading",
       "surface": "android",
@@ -2427,7 +2451,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 210,
+      "line": 278,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "No providers",
       "surface": "android",
@@ -2435,7 +2459,71 @@
     },
     {
       "kind": "ui-named-argument",
-      "line": 241,
+      "line": 320,
+      "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
+      "source": "Configure model",
+      "surface": "android",
+      "id": "native.android.aa2ec7467c5f5091"
+    },
+    {
+      "kind": "ui-named-argument",
+      "line": 322,
+      "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
+      "source": "Add or update a provider model ID. Allowlist-only models are managed outside this screen.",
+      "surface": "android",
+      "id": "native.android.e9e403e88e10b0fb"
+    },
+    {
+      "kind": "ui-named-argument",
+      "line": 326,
+      "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
+      "source": "Provider, e.g. openai",
+      "surface": "android",
+      "id": "native.android.e058e6a956d7e567"
+    },
+    {
+      "kind": "ui-named-argument",
+      "line": 327,
+      "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
+      "source": "Model ID, e.g. gpt-5.5",
+      "surface": "android",
+      "id": "native.android.e3df22e423b797fd"
+    },
+    {
+      "kind": "ui-named-argument",
+      "line": 328,
+      "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
+      "source": "Display name (optional)",
+      "surface": "android",
+      "id": "native.android.ccd0e12dad1e6c02"
+    },
+    {
+      "kind": "conditional-branch",
+      "line": 331,
+      "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
+      "source": "Save model",
+      "surface": "android",
+      "id": "native.android.af4a3ffc36807d08"
+    },
+    {
+      "kind": "conditional-branch",
+      "line": 331,
+      "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
+      "source": "Saving",
+      "surface": "android",
+      "id": "native.android.d5b984b0d454d230"
+    },
+    {
+      "kind": "ui-call",
+      "line": 345,
+      "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
+      "source": "Dismiss",
+      "surface": "android",
+      "id": "native.android.526719c52418d1dd"
+    },
+    {
+      "kind": "ui-named-argument",
+      "line": 366,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "Ready",
       "surface": "android",
@@ -2443,7 +2531,7 @@
     },
     {
       "kind": "ui-named-argument",
-      "line": 242,
+      "line": 367,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "Models",
       "surface": "android",
@@ -2451,7 +2539,7 @@
     },
     {
       "kind": "ui-named-argument",
-      "line": 243,
+      "line": 368,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "Needs",
       "surface": "android",
@@ -2459,23 +2547,23 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 246,
+      "line": 371,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
-      "source": "Connect your Gateway to view provider readiness.",
+      "source": "Connect your Gateway to view provider model config.",
       "surface": "android",
-      "id": "native.android.24fe64a90afae34e"
+      "id": "native.android.98a6bd2f200572fb"
     },
     {
       "kind": "conditional-branch",
-      "line": 246,
+      "line": 371,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
-      "source": "Refresh to recheck provider readiness from your Gateway.",
+      "source": "Refresh to load provider model config and readiness from your Gateway.",
       "surface": "android",
-      "id": "native.android.0bf3fd4d988ecdd9"
+      "id": "native.android.8b11a0c508d48f54"
     },
     {
       "kind": "conditional-branch",
-      "line": 250,
+      "line": 375,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "Refresh",
       "surface": "android",
@@ -2483,7 +2571,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 250,
+      "line": 375,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "Refreshing",
       "surface": "android",
@@ -2491,19 +2579,59 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 281,
+      "line": 413,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
-      "source": "${row.modelCount} models",
+      "source": "${row.modelCount} provider models",
       "surface": "android",
-      "id": "native.android.80393d587b549b8e"
+      "id": "native.android.79c107b49923b803"
     },
     {
       "kind": "conditional-branch",
-      "line": 281,
+      "line": 413,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
-      "source": "No configured models",
+      "source": "No provider model IDs",
       "surface": "android",
-      "id": "native.android.51228649f9d8627a"
+      "id": "native.android.1f201057f59d108b"
+    },
+    {
+      "kind": "ui-named-argument",
+      "line": 455,
+      "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
+      "source": "Test",
+      "surface": "android",
+      "id": "native.android.a709c8b1fc8f9edd"
+    },
+    {
+      "kind": "ui-named-argument",
+      "line": 456,
+      "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
+      "source": "Remove",
+      "surface": "android",
+      "id": "native.android.25b3481d36aabf1c"
+    },
+    {
+      "kind": "conditional-branch",
+      "line": 496,
+      "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
+      "source": "Available",
+      "surface": "android",
+      "id": "native.android.228974a7e9194a94"
+    },
+    {
+      "kind": "conditional-branch",
+      "line": 497,
+      "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
+      "source": "Unavailable",
+      "surface": "android",
+      "id": "native.android.280bfd379764cf58"
+    },
+    {
+      "kind": "conditional-branch",
+      "line": 498,
+      "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
+      "source": "Unknown",
+      "surface": "android",
+      "id": "native.android.54bd518c7c19aad6"
     },
     {
       "kind": "ui-named-argument",

@@ -211,7 +211,9 @@ const expectedConfiguredProviderModel = (params: ConfiguredProviderModelFixture)
 });
 
 describe("gateway server models + voicewake", () => {
-  const listModels = async (params?: { view?: "default" | "configured" | "all" }) =>
+  const listModels = async (params?: {
+    view?: "default" | "configured" | "provider-config" | "all";
+  }) =>
     withEnvAsync(
       {
         OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
@@ -660,6 +662,60 @@ describe("gateway server models + voicewake", () => {
             available: false,
           },
         ]);
+      },
+    );
+  });
+
+  test("models.list provider-config view uses provider models even when an allowlist is configured", async () => {
+    await withModelsConfig(
+      {
+        agents: {
+          defaults: {
+            model: { primary: "openai/gpt-test-z" },
+            models: {
+              "openai/gpt-test-z": {},
+            },
+          },
+        },
+        models: {
+          providers: {
+            minimax: minimaxProviderConfig(),
+          },
+        },
+      },
+      async () => {
+        await seedAgentModelCatalog();
+        const res = await listModels({ view: "provider-config" });
+        expect(res.ok).toBe(true);
+        expect(res.payload?.models).toEqual([
+          {
+            id: "MiniMax-M2.7-highspeed",
+            name: "MiniMax M2.7 Highspeed",
+            provider: "minimax",
+            available: false,
+          },
+        ]);
+      },
+    );
+  });
+
+  test("models.list provider-config view does not show allowlist-only models", async () => {
+    await withModelsConfig(
+      {
+        agents: {
+          defaults: {
+            model: { primary: "openai/not-in-provider-config" },
+            models: {
+              "openai/not-in-provider-config": {},
+            },
+          },
+        },
+      },
+      async () => {
+        await seedAgentModelCatalog();
+        const res = await listModels({ view: "provider-config" });
+        expect(res.ok).toBe(true);
+        expect(res.payload?.models).toEqual([]);
       },
     );
   });

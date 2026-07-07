@@ -153,6 +153,8 @@ class MainViewModel(
   val modelAuthProviders: StateFlow<List<GatewayModelProviderSummary>> = runtimeState(initial = emptyList()) { it.modelAuthProviders }
   val modelCatalogRefreshing: StateFlow<Boolean> = runtimeState(initial = false) { it.modelCatalogRefreshing }
   val modelCatalogErrorText: StateFlow<String?> = runtimeState(initial = null) { it.modelCatalogErrorText }
+  val modelConfigActionState: StateFlow<GatewayModelConfigActionState> = runtimeState(initial = GatewayModelConfigActionState()) { it.modelConfigActionState }
+  val modelTestResults: StateFlow<Map<String, GatewayModelTestResult>> = runtimeState(initial = emptyMap()) { it.modelTestResults }
   val modelFavorites: StateFlow<List<String>> = prefs.modelFavorites
   val modelRecents: StateFlow<List<String>> = prefs.modelRecents
   val sessionCustomGroups: StateFlow<List<String>> = prefs.sessionCustomGroups
@@ -668,6 +670,32 @@ class MainViewModel(
 
   fun refreshModelCatalog() {
     ensureRuntime().refreshModelCatalog()
+  }
+
+  fun clearModelConfigMessage() {
+    ensureRuntime().clearModelConfigMessage()
+  }
+
+  fun configureModel(
+    provider: String,
+    modelId: String,
+    displayName: String?,
+  ) {
+    ensureRuntime().configureModel(provider = provider, modelId = modelId, displayName = displayName)
+  }
+
+  fun removeConfiguredModel(
+    provider: String,
+    modelId: String,
+  ) {
+    ensureRuntime().removeConfiguredModel(provider = provider, modelId = modelId)
+  }
+
+  fun testConfiguredModel(
+    provider: String,
+    modelId: String,
+  ) {
+    ensureRuntime().testConfiguredModel(provider = provider, modelId = modelId)
   }
 
   fun refreshTalkSetupReadiness() {

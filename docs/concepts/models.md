@@ -65,7 +65,7 @@ Other selection rules:
 
 - Changing `agents.defaults.model.primary` does not rewrite existing session pins. If status reports `This session is pinned to X; config primary Y will apply to new/unpinned sessions.`, run `/model default` to clear the pin.
 - CLI default-model and allowlist pickers respect `models.mode: "replace"` by listing only `models.providers.*.models` instead of the full built-in catalog.
-- The Control UI model picker asks the Gateway for its configured model view: `agents.defaults.models` when set (including `provider/*` wildcard entries), otherwise `models.providers.*.models` plus providers with usable auth. The full built-in catalog is reserved for explicit browse views (`models.list` with `view: "all"`, or `openclaw models list --all`).
+- The Control UI model picker asks the Gateway for its configured model view: `agents.defaults.models` when set (including `provider/*` wildcard entries), otherwise `models.providers.*.models` plus providers with usable auth. Provider model management surfaces should use `models.list` with `view: "provider-config"` so add/remove actions stay scoped to `models.providers.*.models`. The full built-in catalog is reserved for explicit browse views (`models.list` with `view: "all"`, or `openclaw models list --all`).
 
 Full mechanics: [Model failover](/concepts/model-failover).
 

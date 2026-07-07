@@ -79,6 +79,8 @@ describe("method scope resolution", () => {
     ["update.status", ["operator.admin"]],
     ["config.schema", ["operator.admin"]],
     ["config.patch", ["operator.admin"]],
+    ["models.configure", ["operator.admin"]],
+    ["models.remove", ["operator.admin"]],
     ["nativeHook.invoke", ["operator.admin"]],
     ["wizard.start", ["operator.admin"]],
     ["update.run", ["operator.admin"]],
@@ -367,6 +369,8 @@ describe("operator scope authorization", () => {
     ["config.schema.lookup", ["operator.read"], { allowed: true }],
     ["config.schema", ["operator.read"], { allowed: false, missingScope: "operator.admin" }],
     ["config.patch", ["operator.admin"], { allowed: true }],
+    ["models.configure", ["operator.admin"], { allowed: true }],
+    ["models.remove", ["operator.admin"], { allowed: true }],
   ])("authorizes %s for scopes %j", (method, scopes, expected) => {
     expect(authorizeOperatorScopesForMethod(method, scopes)).toEqual(expected);
   });

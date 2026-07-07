@@ -113,6 +113,23 @@ function tokenAuthConfig(token: string): OpenClawConfig {
   };
 }
 
+function modelDefinition(id: string, name: string) {
+  return {
+    id,
+    name,
+    reasoning: false,
+    input: ["text" as const],
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+    contextWindow: 128_000,
+    maxTokens: 4_096,
+  };
+}
+
 function trustedProxyConfig(params: {
   trustedProxies?: string[];
   requiredHeaders?: string[];
@@ -160,6 +177,18 @@ function mockPreviousConfig(config: OpenClawConfig): void {
   readConfigFileSnapshotForWriteMock.mockResolvedValue(createConfigWriteSnapshot(config));
 }
 
+function mockPreviousSourceAndRuntimeConfig(params: {
+  sourceConfig: OpenClawConfig;
+  runtimeConfig: OpenClawConfig;
+}): void {
+  const snapshot = createConfigWriteSnapshot(params.runtimeConfig);
+  snapshot.snapshot.sourceConfig = params.sourceConfig;
+  snapshot.snapshot.resolved = params.sourceConfig;
+  snapshot.snapshot.raw = JSON.stringify(params.sourceConfig, null, 2);
+  snapshot.snapshot.parsed = params.sourceConfig;
+  readConfigFileSnapshotForWriteMock.mockResolvedValue(snapshot);
+}
+
 async function runConfigPatch(
   raw: unknown,
   params: { sessionKey?: string; restartDelayMs?: number; replacePaths?: string[] } = {},
@@ -184,6 +213,22 @@ function expectNoDirectRestart(): void {
   expect(scheduleGatewaySigusr1RestartMock).not.toHaveBeenCalled();
 }
 
+async function runModelConfigMethod(
+  method: "models.configure" | "models.remove",
+  params: { provider: string; modelId: string; name?: string },
+) {
+  const { options } = createConfigHandlerHarness({
+    method,
+    params: {
+      baseHash: "base-hash",
+      restartDelayMs: 1_000,
+      ...params,
+    },
+  });
+  await configHandlers[method](options);
+  await flushConfigHandlerMicrotasks();
+}
+
 afterEach(() => {
   vi.clearAllMocks();
   resetPluginRuntimeStateForTest();
@@ -204,6 +249,102 @@ beforeEach(() => {
 });
 
 describe("config shared auth disconnects", () => {
+  it("models.configure writes only authored provider models", async () => {
+    mockPreviousSourceAndRuntimeConfig({
+      sourceConfig: {
+        models: {
+          providers: {
+            openai: {
+              baseUrl: "https://api.openai.test/v1",
+              models: [modelDefinition("authored-model", "Authored model")],
+            },
+          },
+        },
+      },
+      runtimeConfig: {
+        models: {
+          providers: {
+            openai: {
+              baseUrl: "https://api.openai.test/v1",
+              models: [
+                modelDefinition("runtime-default", "Runtime default"),
+                modelDefinition("authored-model", "Authored model"),
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    await runModelConfigMethod("models.configure", {
+      provider: "OpenAI",
+      modelId: "gpt-5.5",
+      name: "GPT 5.5",
+    });
+
+    expect(writeConfigFileMock).toHaveBeenCalledTimes(1);
+    expect(writeConfigFileMock.mock.calls[0]?.[0]).toMatchObject({
+      models: {
+        providers: {
+          openai: {
+            models: [
+              { id: "authored-model", name: "Authored model" },
+              { id: "gpt-5.5", name: "GPT 5.5" },
+            ],
+          },
+        },
+      },
+    });
+  });
+
+  it("models.remove removes only authored provider models", async () => {
+    mockPreviousSourceAndRuntimeConfig({
+      sourceConfig: {
+        models: {
+          providers: {
+            openai: {
+              baseUrl: "https://api.openai.test/v1",
+              models: [
+                modelDefinition("keep-model", "Keep model"),
+                modelDefinition("remove-model", "Remove model"),
+              ],
+            },
+          },
+        },
+      },
+      runtimeConfig: {
+        models: {
+          providers: {
+            openai: {
+              baseUrl: "https://api.openai.test/v1",
+              models: [
+                modelDefinition("runtime-default", "Runtime default"),
+                modelDefinition("keep-model", "Keep model"),
+                modelDefinition("remove-model", "Remove model"),
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    await runModelConfigMethod("models.remove", {
+      provider: "openai",
+      modelId: "remove-model",
+    });
+
+    expect(writeConfigFileMock).toHaveBeenCalledTimes(1);
+    expect(writeConfigFileMock.mock.calls[0]?.[0]).toMatchObject({
+      models: {
+        providers: {
+          openai: {
+            models: [{ id: "keep-model", name: "Keep model" }],
+          },
+        },
+      },
+    });
+  });
+
   it("returns the persisted config from config.set write results", async () => {
     const prevConfig: OpenClawConfig = {
       gateway: {

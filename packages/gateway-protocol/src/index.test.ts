@@ -810,6 +810,7 @@ describe("validateModelsListParams", () => {
     expect(validateModelsListParams({})).toBe(true);
     expect(validateModelsListParams({ view: "default" })).toBe(true);
     expect(validateModelsListParams({ view: "configured" })).toBe(true);
+    expect(validateModelsListParams({ view: "provider-config" })).toBe(true);
     expect(validateModelsListParams({ view: "all" })).toBe(true);
   });
 

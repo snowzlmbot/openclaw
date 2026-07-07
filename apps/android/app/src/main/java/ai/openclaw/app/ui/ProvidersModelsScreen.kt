@@ -2,12 +2,16 @@ package ai.openclaw.app.ui
 
 import ai.openclaw.app.GatewayModelProviderSummary
 import ai.openclaw.app.GatewayModelSummary
+import ai.openclaw.app.GatewayModelTestResult
 import ai.openclaw.app.MainViewModel
+import ai.openclaw.app.modelResultKey
 import ai.openclaw.app.providerDisplayName
 import ai.openclaw.app.ui.design.ClawEmptyState
 import ai.openclaw.app.ui.design.ClawPanel
+import ai.openclaw.app.ui.design.ClawPrimaryButton
 import ai.openclaw.app.ui.design.ClawScaffold
 import ai.openclaw.app.ui.design.ClawSecondaryButton
+import ai.openclaw.app.ui.design.ClawTextField
 import ai.openclaw.app.ui.design.ClawTheme
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -20,7 +24,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -30,24 +33,31 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** Android provider readiness screen backed by the configured gateway model view. */
+/** Android provider readiness screen backed by provider-authored model config. */
 @Composable
 internal fun ProvidersModelsScreen(
   viewModel: MainViewModel,
@@ -58,12 +68,39 @@ internal fun ProvidersModelsScreen(
   val providers by viewModel.modelAuthProviders.collectAsState()
   val refreshing by viewModel.modelCatalogRefreshing.collectAsState()
   val errorText by viewModel.modelCatalogErrorText.collectAsState()
+  val actionState by viewModel.modelConfigActionState.collectAsState()
+  val testResults by viewModel.modelTestResults.collectAsState()
   val providerRows = providerRows(providers = providers, models = models)
+  var pendingRemoval by remember { mutableStateOf<GatewayModelSummary?>(null) }
 
   LaunchedEffect(isConnected) {
     if (isConnected) {
       viewModel.refreshModelCatalog()
     }
+  }
+
+  pendingRemoval?.let { model ->
+    AlertDialog(
+      onDismissRequest = { pendingRemoval = null },
+      title = { Text("Remove model") },
+      text = { Text("Remove ${model.provider}/${model.id} from provider model config?") },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            viewModel.removeConfiguredModel(provider = model.provider, modelId = model.id)
+            pendingRemoval = null
+          },
+          enabled = !actionState.inFlight,
+        ) {
+          Text("Remove")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { pendingRemoval = null }) {
+          Text("Cancel")
+        }
+      },
+    )
   }
 
   ClawScaffold(
@@ -88,7 +125,7 @@ internal fun ProvidersModelsScreen(
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
               Text(text = "Providers & Models", style = ClawTheme.type.display.copy(fontSize = 14.8.sp, lineHeight = 18.sp), color = ClawTheme.colors.text, maxLines = 1)
               Text(
-                text = "Review provider readiness\nand configured models.",
+                text = "Review provider-configured model IDs and availability.",
                 style = ClawTheme.type.caption.copy(fontSize = 12.5.sp, lineHeight = 16.sp),
                 color = ClawTheme.colors.textMuted,
               )
@@ -107,14 +144,31 @@ internal fun ProvidersModelsScreen(
         }
 
         item {
-          ProviderSectionLabel(title = "Connected providers")
+          ModelManagementPanel(
+            isConnected = isConnected,
+            inFlight = actionState.inFlight,
+            message = actionState.message,
+            onDismissMessage = viewModel::clearModelConfigMessage,
+            onConfigureModel = viewModel::configureModel,
+          )
+        }
+
+        item {
+          ProviderSectionLabel(title = "Provider-configured models")
         }
 
         item {
           if (!isConnected && providerRows.isEmpty()) {
-            ClawEmptyState(title = "Gateway offline", body = "Connect your Gateway to load provider readiness.")
+            ClawEmptyState(title = "Gateway offline", body = "Connect your Gateway to load provider model config.")
           } else {
-            ProviderList(rows = providerRows, refreshing = refreshing)
+            ProviderList(
+              rows = providerRows,
+              refreshing = refreshing,
+              actionInFlight = actionState.inFlight,
+              testResults = testResults,
+              onTestModel = viewModel::testConfiguredModel,
+              onRemoveModel = { pendingRemoval = it },
+            )
           }
         }
 
@@ -136,37 +190,44 @@ internal data class ProviderRow(
   val status: String,
   val ready: Boolean,
   val modelCount: Int,
+  val models: List<GatewayModelSummary> = emptyList(),
 )
 
-/** Combines gateway auth-provider readiness with configured model providers. */
+/** Combines gateway auth-provider readiness with provider-authored model config. */
 internal fun providerRows(
   providers: List<GatewayModelProviderSummary>,
   models: List<GatewayModelSummary>,
 ): List<ProviderRow> {
-  val modelCounts = models.groupingBy { it.provider }.eachCount()
+  val modelsByProvider = models.groupBy { it.provider.trim().lowercase() }
+  val sortedModelsByProvider = modelsByProvider.mapValues { (_, providerModels) -> providerModels.sortedWith(modelComparator) }
   val authRows =
     providers
       .map { provider ->
-        val ready = modelProviderReady(provider.status)
+        val providerModels = sortedModelsByProvider[provider.id.trim().lowercase()].orEmpty()
+        val ready = modelProviderReady(provider.status) || providerModels.any { it.available == true }
         ProviderRow(
           id = provider.id,
           name = provider.displayName,
           status = if (ready) "Ready" else "Needs attention",
           ready = ready,
-          modelCount = modelCounts[provider.id] ?: 0,
+          modelCount = providerModels.size,
+          models = providerModels,
         )
       }
   val authProviderIds = authRows.mapTo(mutableSetOf()) { it.id.trim().lowercase() }
   val configuredModelRows =
-    modelCounts.keys
-      .filter { provider -> provider.trim().lowercase() !in authProviderIds }
-      .map { provider ->
+    sortedModelsByProvider
+      .filterKeys { provider -> provider !in authProviderIds }
+      .map { (provider, providerModels) ->
+        val firstProvider = providerModels.firstOrNull()?.provider?.takeIf { it.isNotBlank() } ?: provider
+        val ready = providerModels.any { it.available == true } || providerModels.none { it.available == false }
         ProviderRow(
-          id = provider,
-          name = providerDisplayName(provider),
-          status = "Ready",
-          ready = true,
-          modelCount = modelCounts[provider] ?: 0,
+          id = firstProvider,
+          name = providerDisplayName(firstProvider),
+          status = if (ready) "Ready" else "Needs attention",
+          ready = ready,
+          modelCount = providerModels.size,
+          models = providerModels,
         )
       }
   return (authRows + configuredModelRows).sortedWith(compareBy(::providerPriority, { it.name.lowercase() }))
@@ -181,6 +242,8 @@ internal fun modelProviderReady(status: String): Boolean {
     normalized == "configured" ||
     normalized == "static"
 }
+
+private val modelComparator = compareBy<GatewayModelSummary>({ it.name.lowercase() }, { it.id.lowercase() })
 
 private fun providerPriority(row: ProviderRow): Int = providerPriority(row.id)
 
@@ -199,25 +262,87 @@ private fun providerPriority(provider: String): Int =
 private fun ProviderList(
   rows: List<ProviderRow>,
   refreshing: Boolean,
+  actionInFlight: Boolean,
+  testResults: Map<String, GatewayModelTestResult>,
+  onTestModel: (String, String) -> Unit,
+  onRemoveModel: (GatewayModelSummary) -> Unit,
 ) {
   ClawPanel(contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp)) {
     Column {
       if (rows.isEmpty()) {
         ProviderListRow(
-          ProviderRow(
-            id = "loading",
-            name = "Provider catalog",
-            status = if (refreshing) "Loading" else "No providers",
-            ready = false,
-            modelCount = 0,
-          ),
+          row =
+            ProviderRow(
+              id = "loading",
+              name = "Provider catalog",
+              status = if (refreshing) "Loading" else "No providers",
+              ready = false,
+              modelCount = 0,
+            ),
+          actionInFlight = actionInFlight,
+          testResults = testResults,
+          onTestModel = onTestModel,
+          onRemoveModel = onRemoveModel,
         )
       } else {
-        val visibleRows = rows.take(5)
-        visibleRows.forEachIndexed { index, row ->
-          ProviderListRow(row)
-          if (index != visibleRows.lastIndex) {
+        rows.forEachIndexed { index, row ->
+          ProviderListRow(
+            row = row,
+            actionInFlight = actionInFlight,
+            testResults = testResults,
+            onTestModel = onTestModel,
+            onRemoveModel = onRemoveModel,
+          )
+          if (index != rows.lastIndex) {
             HorizontalDivider(color = ClawTheme.colors.border, thickness = 1.dp)
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun ModelManagementPanel(
+  isConnected: Boolean,
+  inFlight: Boolean,
+  message: String?,
+  onDismissMessage: () -> Unit,
+  onConfigureModel: (String, String, String?) -> Unit,
+) {
+  var provider by rememberSaveable { mutableStateOf("") }
+  var modelId by rememberSaveable { mutableStateOf("") }
+  var displayName by rememberSaveable { mutableStateOf("") }
+  val canSubmit = isConnected && !inFlight && provider.isNotBlank() && modelId.isNotBlank()
+
+  ClawPanel(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+      Text(text = "Configure model", style = ClawTheme.type.section, color = ClawTheme.colors.text)
+      Text(
+        text = "Add or update a provider model ID. Allowlist-only models are managed outside this screen.",
+        style = ClawTheme.type.caption.copy(fontSize = 12.5.sp, lineHeight = 16.sp),
+        color = ClawTheme.colors.textMuted,
+      )
+      ClawTextField(value = provider, onValueChange = { provider = it }, placeholder = "Provider, e.g. openai")
+      ClawTextField(value = modelId, onValueChange = { modelId = it }, placeholder = "Model ID, e.g. gpt-5.5")
+      ClawTextField(value = displayName, onValueChange = { displayName = it }, placeholder = "Display name (optional)")
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        ClawPrimaryButton(
+          text = if (inFlight) "Saving" else "Save model",
+          onClick = {
+            onConfigureModel(provider.trim(), modelId.trim(), displayName.trim().ifEmpty { null })
+            modelId = ""
+            displayName = ""
+          },
+          enabled = canSubmit,
+          modifier = Modifier.weight(1f),
+        )
+      }
+      message?.let { text ->
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+          Text(text = text, style = ClawTheme.type.caption, color = ClawTheme.colors.textMuted, modifier = Modifier.weight(1f))
+          TextButton(onClick = onDismissMessage) {
+            Text("Dismiss")
           }
         }
       }
@@ -243,7 +368,7 @@ private fun ProviderOverviewPanel(
         ProviderMetricTile(label = "Needs", value = needsSetupCount.toString(), modifier = Modifier.weight(1f))
       }
       Text(
-        text = if (isConnected) "Refresh to recheck provider readiness from your Gateway." else "Connect your Gateway to view provider readiness.",
+        text = if (isConnected) "Refresh to load provider model config and readiness from your Gateway." else "Connect your Gateway to view provider model config.",
         style = ClawTheme.type.body,
         color = ClawTheme.colors.textMuted,
       )
@@ -273,19 +398,116 @@ private fun ProviderMetricTile(
 }
 
 @Composable
-private fun ProviderListRow(row: ProviderRow) {
-  Row(modifier = Modifier.fillMaxWidth().heightIn(min = 58.dp).padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-    ProviderBadge(text = row.name)
-    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-      Text(text = row.name, style = ClawTheme.type.body, color = ClawTheme.colors.text, maxLines = 1)
-      Text(text = if (row.modelCount > 0) "${row.modelCount} models" else "No configured models", style = ClawTheme.type.caption.copy(fontSize = 12.5.sp, lineHeight = 16.sp), color = ClawTheme.colors.textMuted, maxLines = 1)
+private fun ProviderListRow(
+  row: ProviderRow,
+  actionInFlight: Boolean,
+  testResults: Map<String, GatewayModelTestResult>,
+  onTestModel: (String, String) -> Unit,
+  onRemoveModel: (GatewayModelSummary) -> Unit,
+) {
+  Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+      ProviderBadge(text = row.name)
+      Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        Text(text = row.name, style = ClawTheme.type.body, color = ClawTheme.colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(text = if (row.modelCount > 0) "${row.modelCount} provider models" else "No provider model IDs", style = ClawTheme.type.caption.copy(fontSize = 12.5.sp, lineHeight = 16.sp), color = ClawTheme.colors.textMuted, maxLines = 1)
+      }
+      ProviderStatusPill(ready = row.ready, status = row.status)
     }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-      Box(modifier = Modifier.size(4.5.dp).clip(CircleShape).background(if (row.ready) ClawTheme.colors.success else ClawTheme.colors.warning))
-      Text(text = row.status, style = ClawTheme.type.caption.copy(fontSize = 12.5.sp, lineHeight = 16.sp), color = ClawTheme.colors.textMuted, maxLines = 1)
+    if (row.models.isNotEmpty()) {
+      Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        row.models.forEach { model ->
+          ProviderModelRow(
+            model = model,
+            testResult = testResults[modelResultKey(model.provider, model.id)],
+            actionInFlight = actionInFlight,
+            onTest = { onTestModel(model.provider, model.id) },
+            onRemove = { onRemoveModel(model) },
+          )
+        }
+      }
     }
   }
 }
+
+@Composable
+private fun ProviderModelRow(
+  model: GatewayModelSummary,
+  testResult: GatewayModelTestResult?,
+  actionInFlight: Boolean,
+  onTest: () -> Unit,
+  onRemove: () -> Unit,
+) {
+  Surface(shape = RoundedCornerShape(ClawTheme.radii.row), color = ClawTheme.colors.surface, border = BorderStroke(1.dp, ClawTheme.colors.border)) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+          Text(text = model.name, style = ClawTheme.type.body, color = ClawTheme.colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+          Text(text = model.id, style = ClawTheme.type.caption.copy(fontSize = 12.2.sp, lineHeight = 15.sp), color = ClawTheme.colors.textMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        ModelAvailabilityPill(model = model, testResult = testResult)
+      }
+      val caps = modelCapabilities(model)
+      if (caps.isNotEmpty()) {
+        Text(text = caps, style = ClawTheme.type.caption.copy(fontSize = 12.sp, lineHeight = 15.sp), color = ClawTheme.colors.textSubtle, maxLines = 2, overflow = TextOverflow.Ellipsis)
+      }
+      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ClawSecondaryButton(text = "Test", onClick = onTest, enabled = !actionInFlight, modifier = Modifier.weight(1f))
+        ClawSecondaryButton(text = "Remove", onClick = onRemove, enabled = !actionInFlight, modifier = Modifier.weight(1f))
+      }
+    }
+  }
+}
+
+@Composable
+private fun ProviderStatusPill(
+  ready: Boolean,
+  status: String,
+) {
+  Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+    Box(modifier = Modifier.size(4.5.dp).clip(CircleShape).background(if (ready) ClawTheme.colors.success else ClawTheme.colors.warning))
+    Text(text = status, style = ClawTheme.type.caption.copy(fontSize = 12.5.sp, lineHeight = 16.sp), color = ClawTheme.colors.textMuted, maxLines = 1)
+  }
+}
+
+@Composable
+private fun ModelAvailabilityPill(
+  model: GatewayModelSummary,
+  testResult: GatewayModelTestResult?,
+) {
+  val label = testResult?.status ?: modelAvailabilityLabel(model.available)
+  val ready = testResult?.available ?: model.available
+  Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+    Box(modifier = Modifier.size(4.5.dp).clip(CircleShape).background(availabilityColor(ready)))
+    Text(text = label, style = ClawTheme.type.caption.copy(fontSize = 12.2.sp, lineHeight = 15.sp), color = ClawTheme.colors.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+  }
+}
+
+@Composable
+private fun availabilityColor(available: Boolean?): Color =
+  when (available) {
+    true -> ClawTheme.colors.success
+    false -> ClawTheme.colors.warning
+    null -> ClawTheme.colors.textSubtle
+  }
+
+private fun modelAvailabilityLabel(available: Boolean?): String =
+  when (available) {
+    true -> "Available"
+    false -> "Unavailable"
+    null -> "Unknown"
+  }
+
+private fun modelCapabilities(model: GatewayModelSummary): String =
+  buildList {
+    if (model.supportsReasoning) add("reasoning")
+    if (model.supportsVision) add("image")
+    if (model.supportsAudio) add("audio")
+    if (model.supportsDocuments) add("document")
+    model.contextTokens?.let { add("${formatContextTokens(it)} context") }
+  }.joinToString(" / ")
+
+private fun formatContextTokens(tokens: Long): String = if (tokens >= 1_000) "${tokens / 1_000}k" else tokens.toString()
 
 @Composable
 private fun ProviderBadge(text: String) {
