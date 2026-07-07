@@ -1,0 +1,221 @@
+name: Android App Session Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Branch, tag, or SHA to validate
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    name: Dedicated OpenClaw App session media proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.target_ref || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Java
+        uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+          cache-dependency-path: |
+            apps/android/**/*.gradle*
+            apps/android/**/gradle-wrapper.properties
+            apps/android/gradle/libs.versions.toml
+
+      - name: Start proof gateway
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proof
+          npm install --prefix /tmp/openclaw-app-session-proof ws@8
+          cat >/tmp/openclaw-app-session-proof/server.cjs <<'EOF'
+          const fs = require('node:fs');
+          const http = require('node:http');
+          const path = require('node:path');
+          const { WebSocketServer } = require('ws');
+
+          const proofDir = path.resolve(process.cwd(), 'proof');
+          fs.mkdirSync(proofDir, { recursive: true });
+          const eventsPath = path.join(proofDir, 'gateway-events.jsonl');
+          const sessionCreatePath = path.join(proofDir, 'session-create.json');
+          const append = (entry) => fs.appendFileSync(eventsPath, `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
+          const server = http.createServer((_req, res) => {
+            res.writeHead(200, { 'content-type': 'text/plain' });
+            res.end('OpenClaw Android proof gateway\n');
+          });
+          const wss = new WebSocketServer({ server });
+
+          function respond(ws, id, payload) {
+            ws.send(JSON.stringify({ type: 'res', id, ok: true, payload }));
+          }
+
+          wss.on('connection', (ws) => {
+            append({ event: 'connection' });
+            ws.send(JSON.stringify({ type: 'event', event: 'connect.challenge', payload: { nonce: 'proof-nonce' } }));
+            ws.on('message', (message) => {
+              let frame;
+              try {
+                frame = JSON.parse(String(message));
+              } catch (error) {
+                append({ event: 'parse-error', error: String(error) });
+                return;
+              }
+              if (frame?.type !== 'req') return;
+              const { id, method, params = {} } = frame;
+              append({ event: 'request', method, params });
+              switch (method) {
+                case 'connect': {
+                  const role = params.role || 'node';
+                  respond(ws, id, {
+                    server: { host: 'Android proof gateway', version: 'proof' },
+                    auth: { deviceToken: `proof-${role}-token`, role, scopes: params.scopes || [] },
+                    snapshot: { sessionDefaults: { mainSessionKey: 'agent:main:main' }, updateAvailable: null },
+                    pluginSurfaceUrls: {},
+                  });
+                  break;
+                }
+                case 'sessions.create': {
+                  const proof = {
+                    method,
+                    key: params.key,
+                    label: params.label,
+                    agentId: params.agentId,
+                    hasParentSessionKey: Object.prototype.hasOwnProperty.call(params, 'parentSessionKey'),
+                    hasEmitCommandHooks: Object.prototype.hasOwnProperty.call(params, 'emitCommandHooks'),
+                    receivedAt: new Date().toISOString(),
+                  };
+                  fs.writeFileSync(sessionCreatePath, `${JSON.stringify(proof, null, 2)}\n`);
+                  respond(ws, id, { key: params.key, sessionKey: params.key, label: params.label, agentId: params.agentId });
+                  break;
+                }
+                case 'chat.history': {
+                  respond(ws, id, {
+                    sessionKey: params.sessionKey,
+                    session: { key: params.sessionKey, label: 'OpenClaw App · Proof Pixel' },
+                    messages: [],
+                    pendingRuns: [],
+                  });
+                  break;
+                }
+                case 'sessions.list': {
+                  respond(ws, id, {
+                    sessions: [
+                      { key: 'agent:main:main', label: 'Main', updatedAt: new Date().toISOString() },
+                      { key: params.sessionKey || 'agent:main:openclaw-app-proof', label: 'OpenClaw App · Proof Pixel', updatedAt: new Date().toISOString() },
+                    ],
+                  });
+                  break;
+                }
+                case 'agents.list': {
+                  respond(ws, id, { defaultId: 'main', mainKey: 'agent:main:main', agents: [{ id: 'main', name: 'OpenClaw', identity: { emoji: '🌙' } }] });
+                  break;
+                }
+                case 'config.get': {
+                  respond(ws, id, { config: { ui: { seamColor: '#1e88e5' } } });
+                  break;
+                }
+                case 'cron.status': {
+                  respond(ws, id, { enabled: true, jobs: 0, nextWakeAtMs: null });
+                  break;
+                }
+                default: {
+                  respond(ws, id, {});
+                }
+              }
+            });
+          });
+
+          server.listen(18789, '0.0.0.0', () => {
+            append({ event: 'listening', port: 18789 });
+            console.log('proof gateway listening on 18789');
+          });
+          EOF
+          node /tmp/openclaw-app-session-proof/server.cjs >proof/gateway.log 2>&1 &
+          echo $! > proof/gateway.pid
+          sleep 2
+          cat proof/gateway.log
+
+      - name: Build and capture media proof on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          script: |
+            set -euo pipefail
+            cd "$GITHUB_WORKSPACE"
+            cd apps/android
+            ./gradlew --no-daemon --build-cache :app:assemblePlayDebug
+            cd "$GITHUB_WORKSPACE"
+            APK="apps/android/app/build/outputs/apk/play/debug/app-play-debug.apk"
+            test -f "$APK"
+            adb install -r "$APK"
+            cat >/tmp/openclaw.node.xml <<'EOF'
+            <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+            <map>
+              <boolean name="onboarding.completed" value="true" />
+              <boolean name="gateway.manual.enabled" value="true" />
+              <string name="gateway.manual.host">10.0.2.2</string>
+              <int name="gateway.manual.port" value="18789" />
+              <boolean name="gateway.manual.tls" value="false" />
+              <string name="node.displayName">Proof Pixel</string>
+            </map>
+            EOF
+            adb push /tmp/openclaw.node.xml /data/local/tmp/openclaw.node.xml
+            adb shell chmod 0644 /data/local/tmp/openclaw.node.xml
+            adb shell run-as ai.openclaw.app mkdir -p shared_prefs
+            adb shell run-as ai.openclaw.app cp /data/local/tmp/openclaw.node.xml shared_prefs/openclaw.node.xml
+            adb shell settings put global window_animation_scale 0
+            adb shell settings put global transition_animation_scale 0
+            adb shell settings put global animator_duration_scale 0
+            adb shell rm -f /sdcard/openclaw-app-session-proof.mp4
+            adb shell screenrecord --time-limit 10 /sdcard/openclaw-app-session-proof.mp4 >/tmp/openclaw-screenrecord.log 2>&1 &
+            adb shell monkey -p ai.openclaw.app -c android.intent.category.LAUNCHER 1
+            for i in $(seq 1 40); do
+              if [ -s proof/session-create.json ]; then
+                break
+              fi
+              sleep 1
+            done
+            cat proof/session-create.json
+            adb exec-out screencap -p > proof/openclaw-app-session-proof.png
+            sleep 11 || true
+            adb pull /sdcard/openclaw-app-session-proof.mp4 proof/openclaw-app-session-proof.mp4 || true
+            adb logcat -d -t 300 > proof/logcat-tail.txt || true
+            cp "$APK" proof/openclaw-app-session-play-debug.apk
+
+      - name: Assert dedicated app session request
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s proof/session-create.json
+          node <<'EOF'
+          const fs = require('node:fs');
+          const proof = JSON.parse(fs.readFileSync('proof/session-create.json', 'utf8'));
+          if (!String(proof.key || '').startsWith('agent:main:openclaw-app-')) throw new Error(`unexpected key: ${proof.key}`);
+          if (!String(proof.label || '').startsWith('OpenClaw App')) throw new Error(`unexpected label: ${proof.label}`);
+          if (proof.hasParentSessionKey) throw new Error('session create unexpectedly carried parentSessionKey');
+          if (proof.hasEmitCommandHooks) throw new Error('session create unexpectedly carried emitCommandHooks');
+          EOF
+          cat proof/session-create.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload media proof
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: android-app-session-media-proof
+          path: proof/
+          if-no-files-found: error
