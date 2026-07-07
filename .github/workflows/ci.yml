@@ -2066,6 +2066,50 @@ jobs:
           });
           server.listen(18789, '0.0.0.0', () => { append({ event: 'listening', port: 18789 }); console.log('proof gateway listening on 18789'); });
           EOF
+          cat >/tmp/openclaw-app-session-proof/run-emulator-proof.sh <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/apps/android"
+          ./gradlew --no-daemon --build-cache :app:assemblePlayDebug
+          cd "$GITHUB_WORKSPACE"
+          APK="apps/android/app/build/outputs/apk/play/debug/app-play-debug.apk"
+          test -f "$APK"
+          adb install -r "$APK"
+          cat >/tmp/openclaw.node.xml <<'PREFS'
+          <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+          <map>
+            <boolean name="onboarding.completed" value="true" />
+            <boolean name="gateway.manual.enabled" value="true" />
+            <string name="gateway.manual.host">10.0.2.2</string>
+            <int name="gateway.manual.port" value="18789" />
+            <boolean name="gateway.manual.tls" value="false" />
+            <string name="node.displayName">Proof Pixel</string>
+          </map>
+          PREFS
+          adb push /tmp/openclaw.node.xml /data/local/tmp/openclaw.node.xml
+          adb shell chmod 0644 /data/local/tmp/openclaw.node.xml
+          adb shell run-as ai.openclaw.app mkdir -p shared_prefs
+          adb shell run-as ai.openclaw.app cp /data/local/tmp/openclaw.node.xml shared_prefs/openclaw.node.xml
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+          adb shell rm -f /sdcard/openclaw-app-session-proof.mp4
+          adb shell screenrecord --time-limit 10 /sdcard/openclaw-app-session-proof.mp4 >/tmp/openclaw-screenrecord.log 2>&1 &
+          adb shell monkey -p ai.openclaw.app -c android.intent.category.LAUNCHER 1
+          for i in $(seq 1 40); do
+            if [ -s proof/session-create.json ]; then
+              break
+            fi
+            sleep 1
+          done
+          cat proof/session-create.json
+          adb exec-out screencap -p > proof/openclaw-app-session-proof.png
+          sleep 11 || true
+          adb pull /sdcard/openclaw-app-session-proof.mp4 proof/openclaw-app-session-proof.mp4 || true
+          adb logcat -d -t 300 > proof/logcat-tail.txt || true
+          cp "$APK" proof/openclaw-app-session-play-debug.apk
+          EOF
+          chmod +x /tmp/openclaw-app-session-proof/run-emulator-proof.sh
           node /tmp/openclaw-app-session-proof/server.cjs >proof/gateway.log 2>&1 &
           echo $! > proof/gateway.pid
           sleep 2
@@ -2080,47 +2124,7 @@ jobs:
           profile: Nexus 6
           emulator-boot-timeout: 900
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: |
-            set -eu
-            cd "$GITHUB_WORKSPACE/apps/android"
-            ./gradlew --no-daemon --build-cache :app:assemblePlayDebug
-            cd "$GITHUB_WORKSPACE"
-            APK="apps/android/app/build/outputs/apk/play/debug/app-play-debug.apk"
-            test -f "$APK"
-            adb install -r "$APK"
-            cat >/tmp/openclaw.node.xml <<'EOF'
-            <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
-            <map>
-              <boolean name="onboarding.completed" value="true" />
-              <boolean name="gateway.manual.enabled" value="true" />
-              <string name="gateway.manual.host">10.0.2.2</string>
-              <int name="gateway.manual.port" value="18789" />
-              <boolean name="gateway.manual.tls" value="false" />
-              <string name="node.displayName">Proof Pixel</string>
-            </map>
-            EOF
-            adb push /tmp/openclaw.node.xml /data/local/tmp/openclaw.node.xml
-            adb shell chmod 0644 /data/local/tmp/openclaw.node.xml
-            adb shell run-as ai.openclaw.app mkdir -p shared_prefs
-            adb shell run-as ai.openclaw.app cp /data/local/tmp/openclaw.node.xml shared_prefs/openclaw.node.xml
-            adb shell settings put global window_animation_scale 0
-            adb shell settings put global transition_animation_scale 0
-            adb shell settings put global animator_duration_scale 0
-            adb shell rm -f /sdcard/openclaw-app-session-proof.mp4
-            adb shell screenrecord --time-limit 10 /sdcard/openclaw-app-session-proof.mp4 >/tmp/openclaw-screenrecord.log 2>&1 &
-            adb shell monkey -p ai.openclaw.app -c android.intent.category.LAUNCHER 1
-            for i in $(seq 1 40); do
-              if [ -s proof/session-create.json ]; then
-                break
-              fi
-              sleep 1
-            done
-            cat proof/session-create.json
-            adb exec-out screencap -p > proof/openclaw-app-session-proof.png
-            sleep 11 || true
-            adb pull /sdcard/openclaw-app-session-proof.mp4 proof/openclaw-app-session-proof.mp4 || true
-            adb logcat -d -t 300 > proof/logcat-tail.txt || true
-            cp "$APK" proof/openclaw-app-session-play-debug.apk
+          script: /bin/bash /tmp/openclaw-app-session-proof/run-emulator-proof.sh
 
       - name: Assert dedicated app session request
         shell: bash
