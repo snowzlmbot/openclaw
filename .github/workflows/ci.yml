@@ -2069,11 +2069,14 @@ jobs:
           cat >/tmp/openclaw-app-session-proof/run-emulator-proof.sh <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
+          set -x
           cd "$GITHUB_WORKSPACE/apps/android"
           ./gradlew --no-daemon --build-cache :app:assemblePlayDebug
           cd "$GITHUB_WORKSPACE"
-          APK="apps/android/app/build/outputs/apk/play/debug/app-play-debug.apk"
-          test -f "$APK"
+          APK="$(find apps/android/app/build/outputs/apk -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+          ls -lh "$APK"
+          adb devices
           adb install -r "$APK"
           cat >/tmp/openclaw.node.xml <<'PREFS'
           <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
