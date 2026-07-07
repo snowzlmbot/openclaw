@@ -1,5 +1,8 @@
 /** Tests runtime SecretRef resolution across core config and auth-profile surfaces. */
+import fs from "node:fs/promises";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.ts";
 import { redactSensitiveText } from "../logging/redact.js";
 import { resetSecretRedactionRegistryForTest } from "../logging/secret-redaction-registry.js";
 import { asConfig, setupSecretsRuntimeSnapshotTestHooks } from "./runtime.test-support.ts";
@@ -7,6 +10,7 @@ import { asConfig, setupSecretsRuntimeSnapshotTestHooks } from "./runtime.test-s
 const EMPTY_LOADABLE_PLUGIN_ORIGINS = new Map();
 const BUNDLED_CODEX_PLUGIN_ORIGINS = new Map([["codex", "bundled" as const]]);
 const { prepareSecretsRuntimeSnapshot } = setupSecretsRuntimeSnapshotTestHooks();
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 const CODEX_APP_SERVER_TOKEN_REF = {
   source: "env",
@@ -17,6 +21,12 @@ const CODEX_APP_SERVER_TOKEN_REF = {
 afterEach(() => {
   resetSecretRedactionRegistryForTest();
 });
+
+const ELEVENLABS_API_KEY_REF = {
+  source: "env",
+  provider: "default",
+  id: "ELEVENLABS_API_KEY",
+} as const;
 
 function expectWarning(
   snapshot: Awaited<ReturnType<typeof prepareSecretsRuntimeSnapshot>>,
@@ -31,20 +41,38 @@ function expectWarning(
 }
 
 describe("secrets runtime snapshot", () => {
-  it("registers every resolved value for exact redaction", async () => {
-    const secret = "runtime-registration-secret";
+  it("registers required and optional resolved values for exact redaction", async () => {
+    const requiredSecret = "runtime-registration-secret";
+    const optionalSecret = "optional-tts-registration-secret";
     await prepareSecretsRuntimeSnapshot({
       config: asConfig({
         talk: {
           apiKey: { source: "env", provider: "default", id: "TALK_API_KEY" },
         },
+        messages: {
+          tts: {
+            providers: {
+              elevenlabs: {
+                apiKey: ELEVENLABS_API_KEY_REF,
+              },
+            },
+          },
+        },
       }),
-      env: { TALK_API_KEY: secret },
+      env: {
+        TALK_API_KEY: requiredSecret,
+        ELEVENLABS_API_KEY: optionalSecret,
+      },
       includeAuthStoreRefs: false,
       loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
     });
 
-    expect(redactSensitiveText(`resolved ${secret}`, { mode: "off" })).toBe("resolved runtim…cret");
+    expect(redactSensitiveText(`resolved ${requiredSecret}`, { mode: "off" })).toBe(
+      "resolved runtim…cret",
+    );
+    expect(redactSensitiveText(`resolved ${optionalSecret}`, { mode: "off" })).toBe(
+      "resolved option…cret",
+    );
   });
 
   it("resolves sandbox ssh secret refs for active ssh backends", async () => {
@@ -189,6 +217,241 @@ describe("secrets runtime snapshot", () => {
         loadablePluginOrigins: BUNDLED_CODEX_PLUGIN_ORIGINS,
       }),
     ).rejects.toThrow('Environment variable "CODEX_APP_SERVER_TOKEN" is missing or empty.');
+  });
+
+  it("fails closed for missing optional TTS SecretRefs by default", async () => {
+    await expect(
+      prepareSecretsRuntimeSnapshot({
+        config: asConfig({
+          messages: {
+            tts: {
+              providers: {
+                elevenlabs: {
+                  apiKey: ELEVENLABS_API_KEY_REF,
+                },
+              },
+            },
+          },
+        }),
+        env: {},
+        includeAuthStoreRefs: false,
+        loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
+      }),
+    ).rejects.toThrow('Environment variable "ELEVENLABS_API_KEY" is missing or empty.');
+  });
+
+  it("degrades optional TTS provider SecretRefs when cold-start policy is enabled", async () => {
+    const snapshot = await prepareSecretsRuntimeSnapshot({
+      config: asConfig({
+        messages: {
+          tts: {
+            providers: {
+              elevenlabs: {
+                apiKey: ELEVENLABS_API_KEY_REF,
+              },
+            },
+          },
+        },
+      }),
+      env: {},
+      includeAuthStoreRefs: false,
+      allowUnavailableOptionalSecrets: true,
+      loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
+    });
+
+    expect(snapshot.config.messages?.tts?.providers?.elevenlabs?.apiKey).toBeUndefined();
+    expectWarning(snapshot, {
+      code: "SECRETS_REF_UNAVAILABLE_OPTIONAL",
+      path: "messages.tts.providers.elevenlabs.apiKey",
+    });
+    expect(snapshot.warnings[0]?.message).toContain(
+      'Environment variable "ELEVENLABS_API_KEY" is missing or empty.',
+    );
+  });
+
+  it("degrades optional TTS provider SecretRefs when a file value is absent", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const root = tempDirs.make("openclaw-tts-secretref-missing-");
+    const secretsPath = path.join(root, "secrets.json");
+    await fs.writeFile(secretsPath, JSON.stringify({ providers: {} }, null, 2), "utf8");
+    await fs.chmod(secretsPath, 0o600);
+
+    const snapshot = await prepareSecretsRuntimeSnapshot({
+      config: asConfig({
+        secrets: {
+          providers: {
+            ttsfile: {
+              source: "file",
+              path: secretsPath,
+              mode: "json",
+            },
+          },
+        },
+        messages: {
+          tts: {
+            providers: {
+              elevenlabs: {
+                apiKey: {
+                  source: "file",
+                  provider: "ttsfile",
+                  id: "/providers/elevenlabs/apiKey",
+                },
+              },
+            },
+          },
+        },
+      }),
+      env: {},
+      includeAuthStoreRefs: false,
+      allowUnavailableOptionalSecrets: true,
+      loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
+    });
+
+    expect(snapshot.config.messages?.tts?.providers?.elevenlabs?.apiKey).toBeUndefined();
+    expectWarning(snapshot, {
+      code: "SECRETS_REF_UNAVAILABLE_OPTIONAL",
+      path: "messages.tts.providers.elevenlabs.apiKey",
+    });
+    expect(snapshot.warnings[0]?.message).toContain(
+      'JSON pointer segment "elevenlabs" does not exist.',
+    );
+  });
+
+  it("keeps optional TTS SecretRef provider policy failures fail-closed", async () => {
+    await expect(
+      prepareSecretsRuntimeSnapshot({
+        config: asConfig({
+          secrets: {
+            providers: {
+              default: {
+                source: "env",
+                allowlist: ["OTHER_API_KEY"],
+              },
+            },
+          },
+          messages: {
+            tts: {
+              providers: {
+                elevenlabs: {
+                  apiKey: ELEVENLABS_API_KEY_REF,
+                },
+              },
+            },
+          },
+        }),
+        env: {
+          ELEVENLABS_API_KEY: "sk-elevenlabs-test",
+        },
+        includeAuthStoreRefs: false,
+        allowUnavailableOptionalSecrets: true,
+        loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
+      }),
+    ).rejects.toThrow(
+      'Environment variable "ELEVENLABS_API_KEY" is not allowlisted in secrets.providers.default.allowlist.',
+    );
+  });
+
+  it("keeps invalid optional TTS SecretRef ids fail-closed", async () => {
+    await expect(
+      prepareSecretsRuntimeSnapshot({
+        config: asConfig({
+          messages: {
+            tts: {
+              providers: {
+                elevenlabs: {
+                  apiKey: { source: "env", provider: "default", id: "elevenlabs_api_key" },
+                },
+              },
+            },
+          },
+        }),
+        env: {
+          elevenlabs_api_key: "sk-elevenlabs-test",
+        },
+        includeAuthStoreRefs: false,
+        allowUnavailableOptionalSecrets: true,
+        loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
+      }),
+    ).rejects.toThrow("Env secret reference id must match");
+  });
+
+  it("keeps optional TTS SecretRefs that resolve to non-strings fail-closed", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const root = tempDirs.make("openclaw-tts-secretref-object-");
+    const secretsPath = path.join(root, "secrets.json");
+    await fs.writeFile(
+      secretsPath,
+      JSON.stringify(
+        {
+          providers: {
+            elevenlabs: {
+              apiKey: { value: "not-a-string" },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    await fs.chmod(secretsPath, 0o600);
+
+    await expect(
+      prepareSecretsRuntimeSnapshot({
+        config: asConfig({
+          secrets: {
+            providers: {
+              ttsfile: {
+                source: "file",
+                path: secretsPath,
+                mode: "json",
+              },
+            },
+          },
+          messages: {
+            tts: {
+              providers: {
+                elevenlabs: {
+                  apiKey: {
+                    source: "file",
+                    provider: "ttsfile",
+                    id: "/providers/elevenlabs/apiKey",
+                  },
+                },
+              },
+            },
+          },
+        }),
+        env: {},
+        includeAuthStoreRefs: false,
+        allowUnavailableOptionalSecrets: true,
+        loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
+      }),
+    ).rejects.toThrow(
+      "messages.tts.providers.elevenlabs.apiKey resolved to a non-string or empty value.",
+    );
+  });
+
+  it("still fails required gateway auth SecretRefs when env is missing", async () => {
+    await expect(
+      prepareSecretsRuntimeSnapshot({
+        config: asConfig({
+          gateway: {
+            auth: {
+              mode: "token",
+              token: { source: "env", provider: "default", id: "GATEWAY_TOKEN_REF" },
+            },
+          },
+        }),
+        env: {},
+        includeAuthStoreRefs: false,
+        loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
+      }),
+    ).rejects.toThrow('Environment variable "GATEWAY_TOKEN_REF" is missing or empty.');
   });
 
   it("fails when an active exec ref id contains traversal segments", async () => {

@@ -23,6 +23,10 @@ function collectProviderApiKeyAssignment(params: {
     context: params.context,
     active: params.active,
     inactiveReason: params.inactiveReason,
+    optional: true,
+    optionalReason:
+      "TTS provider API keys are optional at Gateway startup; only speech synthesis for this provider should fail while the key is unavailable.",
+    unavailableValue: undefined,
     apply: (value) => {
       params.providerConfig.apiKey = value;
     },

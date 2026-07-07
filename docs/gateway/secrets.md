@@ -21,7 +21,7 @@ Plaintext credentials remain agent-readable if they sit in files the agent can i
 ## Runtime model
 
 - Secrets resolve into an in-memory runtime snapshot, eagerly during activation, not lazily on request paths.
-- Startup fails fast when an effectively active SecretRef cannot be resolved.
+- Startup fails fast when an effectively active SecretRef cannot be resolved. The narrow exception is a missing built-in TTS provider API-key ref during cold Gateway startup, before any runtime secrets snapshot is active; see [Text-to-speech](/tools/tts). Reload and config-write preflight remain strict for the same TTS refs.
 - Reload is an atomic swap: full success, or keep the last-known-good snapshot.
 - Policy violations (for example an OAuth-mode auth profile combined with SecretRef input) fail activation before the runtime swap.
 - Runtime requests read only the active in-memory snapshot. Model-provider SecretRef credentials pass through auth storage and stream options as process-local sentinels until egress. Outbound delivery paths (Discord reply/thread delivery, Telegram action sends) also read that snapshot and do not re-resolve refs per send.
@@ -594,6 +594,7 @@ Activation contract:
 
 - Success swaps the snapshot atomically.
 - Startup failure aborts gateway startup.
+- A missing built-in TTS provider API-key ref may degrade only during cold startup before any runtime secrets snapshot is active; the affected TTS provider remains unconfigured. Reload, restart-check, and write preflight do not use this exception.
 - Runtime reload failure keeps the last-known-good snapshot.
 - Write-RPC preflight failure rejects the submitted config; both disk config and the active runtime snapshot stay unchanged.
 - Providing an explicit per-call channel token to an outbound helper/tool call does not trigger SecretRef activation; activation points remain startup, reload, and explicit `secrets.reload`.

@@ -810,6 +810,17 @@ Reply -> TTS enabled?
     </ParamField>
   </Accordion>
 
+Provider `apiKey` fields can be raw strings or SecretRefs. During cold Gateway
+startup, before any runtime secrets snapshot is active, these keys are optional
+when the secret value is absent: startup continues, the affected provider is
+treated as unconfigured/degraded, and only speech synthesis requests for that
+provider fail with the normal provider-not-configured path, such as
+`TTS conversion failed: elevenlabs: not configured`. Reloads and config-write
+preflight remain fail-closed so an unavailable TTS ref cannot replace the
+last-known-good snapshot or authorize an unresolved config write. Invalid
+SecretRefs, provider policy/security failures, and non-string resolved values
+also remain fail-closed.
+
   <Accordion title="Azure Speech">
     <ParamField path="apiKey" type="string">Env: `AZURE_SPEECH_KEY`, `AZURE_SPEECH_API_KEY`, or `SPEECH_KEY`.</ParamField>
     <ParamField path="region" type="string">Azure Speech region (e.g. `eastus`). Env: `AZURE_SPEECH_REGION` or `SPEECH_REGION`.</ParamField>
