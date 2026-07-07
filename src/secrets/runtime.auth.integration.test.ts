@@ -57,8 +57,7 @@ vi.mock("./runtime-prepare.runtime.js", () => ({
       }
     }
   },
-  resolveSecretRefValues: async () => new Map(),
-  applyResolvedAssignments: () => {},
+  resolveAndApplySecretAssignments: async () => {},
   resolveRuntimeWebTools: async () => ({
     search: { providerSource: "none", diagnostics: [] },
     fetch: { providerSource: "none", diagnostics: [] },

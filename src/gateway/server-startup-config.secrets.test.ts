@@ -664,6 +664,108 @@ describe("gateway startup config secret preflight", () => {
     expect(emitStateEvent).not.toHaveBeenCalled();
   });
 
+  it("allows startup snapshots with optional TTS SecretRef warnings", async () => {
+    const sourceConfig = gatewayTokenConfig({
+      messages: {
+        tts: {
+          providers: {
+            elevenlabs: {
+              apiKey: { source: "env", provider: "default", id: "ELEVENLABS_API_KEY" },
+            },
+          },
+        },
+      },
+    });
+    const resolvedConfig = structuredClone(sourceConfig);
+    delete resolvedConfig.messages!.tts!.providers!.elevenlabs!.apiKey;
+    const warning: SecretResolverWarning = {
+      code: "SECRETS_REF_UNAVAILABLE_OPTIONAL",
+      path: "messages.tts.providers.elevenlabs.apiKey",
+      message:
+        'messages.tts.providers.elevenlabs.apiKey: optional SecretRef "env:default:ELEVENLABS_API_KEY" is unavailable; leaving this capability unconfigured until the SecretRef resolves. Environment variable "ELEVENLABS_API_KEY" is missing or empty.',
+    };
+    const prepareRuntimeSecretsSnapshot = vi.fn(async () => ({
+      ...preparedSnapshot(sourceConfig),
+      config: resolvedConfig,
+      warnings: [warning],
+    }));
+    const emitStateEvent = vi.fn();
+    const logSecrets = mockLogSecretsForTest();
+    const activateRuntimeSecrets = runtimeSecretsActivatorForTest({
+      emitStateEvent,
+      logSecrets,
+      prepareRuntimeSecretsSnapshot,
+    });
+
+    const result = await activateRuntimeSecrets(sourceConfig, {
+      reason: "startup",
+      activate: true,
+    });
+
+    expect(result.config.messages?.tts?.providers?.elevenlabs?.apiKey).toBeUndefined();
+    expect(prepareRuntimeSecretsSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ allowUnavailableOptionalSecrets: true }),
+    );
+    expect(logSecrets.warn).toHaveBeenCalledWith(`[${warning.code}] ${warning.message}`);
+    expect(emitStateEvent).not.toHaveBeenCalled();
+  });
+
+  it.each(["reload", "restart-check"] as const)(
+    "keeps missing optional TTS SecretRefs fail-closed during %s",
+    async (reason) => {
+      const missingSecretError = new Error(
+        'Environment variable "ELEVENLABS_API_KEY" is missing or empty.',
+      );
+      const prepareRuntimeSecretsSnapshot = vi.fn(async () => {
+        throw missingSecretError;
+      });
+      const activateRuntimeSecretsSnapshot = vi.fn();
+      const activateRuntimeSecrets = runtimeSecretsActivatorForTest({
+        prepareRuntimeSecretsSnapshot,
+        activateRuntimeSecretsSnapshot,
+      });
+
+      await expect(
+        activateRuntimeSecrets(gatewayTokenConfig({}), {
+          reason,
+          activate: true,
+        }),
+      ).rejects.toThrow(missingSecretError.message);
+
+      expect(prepareRuntimeSecretsSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({ allowUnavailableOptionalSecrets: false }),
+      );
+      expect(activateRuntimeSecretsSnapshot).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not enable cold-start degradation while a runtime snapshot is active", async () => {
+    activateSecretsRuntimeSnapshotForTest(preparedSnapshot(gatewayTokenConfig({})));
+    const missingSecretError = new Error(
+      'Environment variable "ELEVENLABS_API_KEY" is missing or empty.',
+    );
+    const prepareRuntimeSecretsSnapshot = vi.fn(async () => {
+      throw missingSecretError;
+    });
+    const activateRuntimeSecretsSnapshot = vi.fn();
+    const activateRuntimeSecrets = runtimeSecretsActivatorForTest({
+      prepareRuntimeSecretsSnapshot,
+      activateRuntimeSecretsSnapshot,
+    });
+
+    await expect(
+      activateRuntimeSecrets(gatewayTokenConfig({}), {
+        reason: "startup",
+        activate: false,
+      }),
+    ).rejects.toThrow("Startup failed: required secrets are unavailable.");
+
+    expect(prepareRuntimeSecretsSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ allowUnavailableOptionalSecrets: false }),
+    );
+    expect(activateRuntimeSecretsSnapshot).not.toHaveBeenCalled();
+  });
+
   it("uses persisted auth stores only for startup secret preflight", async () => {
     const prepareRuntimeSecretsSnapshot = vi.fn(async ({ config }) => preparedSnapshot(config));
     const activateRuntimeSecrets = runtimeSecretsActivatorForTest({

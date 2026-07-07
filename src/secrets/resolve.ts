@@ -39,6 +39,13 @@ import {
   resolveDefaultSecretProviderAlias,
   secretRefKey,
 } from "./ref-contract.js";
+import {
+  isMissingSecretRefResolutionError,
+  isProviderScopedSecretResolutionError,
+  isSecretResolutionError,
+  providerResolutionError,
+  refResolutionError,
+} from "./resolve-errors.js";
 import type { SecretRefResolveCache } from "./resolve-types.js";
 import {
   isNonEmptyString,
@@ -76,81 +83,7 @@ type ResolutionLimits = {
 
 type ProviderResolutionOutput = Map<string, unknown>;
 
-/** Error for failures that affect an entire configured secret provider. */
-/** Error emitted when a configured secret provider cannot resolve a ref. */
-class SecretProviderResolutionError extends Error {
-  readonly scope = "provider" as const;
-  readonly source: SecretRefSource;
-  readonly provider: string;
-
-  constructor(params: {
-    source: SecretRefSource;
-    provider: string;
-    message: string;
-    cause?: unknown;
-  }) {
-    super(params.message, params.cause !== undefined ? { cause: params.cause } : undefined);
-    this.name = "SecretProviderResolutionError";
-    this.source = params.source;
-    this.provider = params.provider;
-  }
-}
-
-/** Error for failures limited to one SecretRef id under a provider. */
-class SecretRefResolutionError extends Error {
-  readonly scope = "ref" as const;
-  readonly source: SecretRefSource;
-  readonly provider: string;
-  readonly refId: string;
-
-  constructor(params: {
-    source: SecretRefSource;
-    provider: string;
-    refId: string;
-    message: string;
-    cause?: unknown;
-  }) {
-    super(params.message, params.cause !== undefined ? { cause: params.cause } : undefined);
-    this.name = "SecretRefResolutionError";
-    this.source = params.source;
-    this.provider = params.provider;
-    this.refId = params.refId;
-  }
-}
-
-/** Type guard for provider-scoped secret resolution failures. */
-export function isProviderScopedSecretResolutionError(
-  value: unknown,
-): value is SecretProviderResolutionError {
-  return value instanceof SecretProviderResolutionError;
-}
-
-function isSecretResolutionError(
-  value: unknown,
-): value is SecretProviderResolutionError | SecretRefResolutionError {
-  return (
-    value instanceof SecretProviderResolutionError || value instanceof SecretRefResolutionError
-  );
-}
-
-function providerResolutionError(params: {
-  source: SecretRefSource;
-  provider: string;
-  message: string;
-  cause?: unknown;
-}): SecretProviderResolutionError {
-  return new SecretProviderResolutionError(params);
-}
-
-function refResolutionError(params: {
-  source: SecretRefSource;
-  provider: string;
-  refId: string;
-  message: string;
-  cause?: unknown;
-}): SecretRefResolutionError {
-  return new SecretRefResolutionError(params);
-}
+export { isMissingSecretRefResolutionError, isProviderScopedSecretResolutionError };
 
 function throwUnknownProviderResolutionError(params: {
   source: SecretRefSource;
@@ -394,6 +327,7 @@ async function resolveEnvRefs(params: {
   for (const ref of params.refs) {
     if (allowlist && !allowlist.has(ref.id)) {
       throw refResolutionError({
+        code: "SECRET_REF_POLICY_DENIED",
         source: "env",
         provider: params.providerName,
         refId: ref.id,
@@ -403,6 +337,7 @@ async function resolveEnvRefs(params: {
     const envValue = params.env[ref.id];
     if (!isNonEmptyString(envValue)) {
       throw refResolutionError({
+        code: "SECRET_REF_NOT_FOUND",
         source: "env",
         provider: params.providerName,
         refId: ref.id,
@@ -440,6 +375,7 @@ async function resolveFileRefs(params: {
     for (const ref of params.refs) {
       if (ref.id !== SINGLE_VALUE_FILE_REF_ID) {
         throw refResolutionError({
+          code: "SECRET_REF_INVALID",
           source: "file",
           provider: params.providerName,
           refId: ref.id,
@@ -454,7 +390,10 @@ async function resolveFileRefs(params: {
     try {
       resolved.set(ref.id, readJsonPointer(payload, ref.id, { onMissing: "throw" }));
     } catch (err) {
+      // File ref ids are validated before provider dispatch, so pointer failures here mean the
+      // requested value is absent rather than the SecretRef contract being malformed.
       throw refResolutionError({
+        code: "SECRET_REF_NOT_FOUND",
         source: "file",
         provider: params.providerName,
         refId: ref.id,
@@ -533,6 +472,7 @@ function parseExecValues(params: {
       const code = isRecord(entry) && typeof entry.code === "string" ? entry.code : null;
       const safeCode = code && SAFE_EXEC_ERROR_CODES.has(code) ? code : null;
       throw refResolutionError({
+        code: "SECRET_REF_PROVIDER_ERROR",
         source: "exec",
         provider: params.providerName,
         refId: id,
@@ -541,6 +481,7 @@ function parseExecValues(params: {
     }
     if (!Object.hasOwn(responseValues, id)) {
       throw refResolutionError({
+        code: "SECRET_REF_NOT_FOUND",
         source: "exec",
         provider: params.providerName,
         refId: id,
@@ -852,6 +793,7 @@ export async function resolveSecretRefValues(
     for (const ref of result.group.refs) {
       if (!result.values.has(ref.id)) {
         throw refResolutionError({
+          code: "SECRET_REF_PROVIDER_CONTRACT",
           source: result.group.source,
           provider: result.group.providerName,
           refId: ref.id,
@@ -876,6 +818,7 @@ export async function resolveSecretRefValue(
     const resolved = await resolveSecretRefValues([ref], options);
     if (!resolved.has(key)) {
       throw refResolutionError({
+        code: "SECRET_REF_PROVIDER_CONTRACT",
         source: ref.source,
         provider: ref.provider,
         refId: ref.id,

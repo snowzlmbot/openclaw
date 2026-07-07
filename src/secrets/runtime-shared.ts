@@ -10,6 +10,7 @@ import { isRecord } from "./shared.js";
 export type SecretResolverWarningCode =
   | "SECRETS_REF_OVERRIDES_PLAINTEXT"
   | "SECRETS_REF_IGNORED_INACTIVE_SURFACE"
+  | "SECRETS_REF_UNAVAILABLE_OPTIONAL"
   | "WEB_SEARCH_PROVIDER_INVALID_AUTODETECT"
   | "WEB_SEARCH_AUTODETECT_SELECTED"
   | "WEB_SEARCH_KEY_UNRESOLVED_FALLBACK_USED"
@@ -29,6 +30,9 @@ type SecretAssignment = {
   ref: SecretRef;
   path: string;
   expected: "string" | "string-or-object";
+  optional?: boolean;
+  optionalReason?: string;
+  unavailableValue?: unknown;
   apply: (value: unknown) => void;
 };
 
@@ -111,6 +115,9 @@ export function collectSecretInputAssignment(params: {
   context: ResolverContext;
   active?: boolean;
   inactiveReason?: string;
+  optional?: boolean;
+  optionalReason?: string;
+  unavailableValue?: unknown;
   apply: (value: unknown) => void;
 }): void {
   const ref = coerceSecretRef(params.value, params.defaults);
@@ -129,6 +136,11 @@ export function collectSecretInputAssignment(params: {
     ref,
     path: params.path,
     expected: params.expected,
+    ...(params.optional ? { optional: true } : {}),
+    ...(params.optionalReason ? { optionalReason: params.optionalReason } : {}),
+    ...(Object.hasOwn(params, "unavailableValue")
+      ? { unavailableValue: params.unavailableValue }
+      : {}),
     apply: params.apply,
   });
 }

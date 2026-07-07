@@ -15,7 +15,6 @@ import {
 } from "../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { coerceSecretRef } from "../config/types.secrets.js";
-import { registerSecretValueForRedaction } from "../logging/secret-redaction-registry.js";
 import type { PluginManifestRegistry } from "../plugins/manifest-registry.js";
 import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
 import type { PluginOrigin } from "../plugins/plugin-origin.types.js";
@@ -133,6 +132,8 @@ export async function prepareSecretsRuntimeSnapshot(params: {
   loadAuthStore?: (agentDir?: string) => AuthProfileStore;
   manifestRegistry?: Pick<PluginManifestRegistry, "plugins">;
   pluginMetadataSnapshot?: Pick<PluginMetadataSnapshot, "plugins" | "manifestRegistry">;
+  /** Allow missing refs for explicitly optional surfaces during cold Gateway startup only. */
+  allowUnavailableOptionalSecrets?: boolean;
   /** Test override for discovered loadable plugins and their origins. */
   loadablePluginOrigins?: ReadonlyMap<string, PluginOrigin>;
 }): Promise<PreparedSecretsRuntimeSnapshot> {
@@ -178,12 +179,11 @@ export async function prepareSecretsRuntimeSnapshot(params: {
   }
 
   const {
-    applyResolvedAssignments,
     collectAuthStoreAssignments,
     collectConfigAssignments,
     createResolverContext,
+    resolveAndApplySecretAssignments,
     resolveRuntimeWebTools,
-    resolveSecretRefValues,
   } = await loadRuntimePrepareHelpers();
   const manifestRegistry =
     params.manifestRegistry ?? params.pluginMetadataSnapshot?.manifestRegistry;
@@ -228,21 +228,16 @@ export async function prepareSecretsRuntimeSnapshot(params: {
   }
 
   if (context.assignments.length > 0) {
-    const refs = context.assignments.map((assignment) => assignment.ref);
-    const resolved = await resolveSecretRefValues(refs, {
-      config: sourceConfig,
-      env: context.env,
-      cache: context.cache,
-      manifestRegistry: context.manifestRegistry,
-    });
-    for (const value of resolved.values()) {
-      if (typeof value === "string") {
-        registerSecretValueForRedaction(value);
-      }
-    }
-    applyResolvedAssignments({
+    await resolveAndApplySecretAssignments({
       assignments: context.assignments,
-      resolved,
+      context,
+      allowUnavailableOptionalAssignments: params.allowUnavailableOptionalSecrets,
+      options: {
+        config: sourceConfig,
+        env: context.env,
+        cache: context.cache,
+        manifestRegistry: context.manifestRegistry,
+      },
     });
   }
 

@@ -208,4 +208,28 @@ describe("ttsHandlers", () => {
       message: "No TTS provider is configured.",
     });
   });
+
+  it("tts.speak keeps degraded provider-not-configured failures localized to TTS", async () => {
+    mocks.synthesizeSpeech.mockResolvedValue({
+      success: false,
+      error: "TTS conversion failed: elevenlabs: not configured",
+    });
+
+    const { ttsHandlers } = await import("./tts.js");
+    const respond = vi.fn();
+
+    await expectDefined(
+      ttsHandlers["tts.speak"],
+      'ttsHandlers["tts.speak"] test invariant',
+    )({
+      params: { text: "Hello there." },
+      respond,
+      context: { getRuntimeConfig: mocks.getRuntimeConfig },
+    } as never);
+
+    expectGatewayErrorResponse(respond, {
+      code: ErrorCodes.UNAVAILABLE,
+      message: "TTS conversion failed: elevenlabs: not configured",
+    });
+  });
 });
