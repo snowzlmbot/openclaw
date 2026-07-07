@@ -18,6 +18,7 @@ OpenClaw Android is the officially released Google Play app. It connects to an O
 - [x] Authenticated background presence beacons
 - [x] Voice tab full functionality
 - [x] Screen tab full functionality
+- [x] Cron job management: details, edits, run now, enable/disable, delete, and run history
 
 ## Open in Android Studio
 

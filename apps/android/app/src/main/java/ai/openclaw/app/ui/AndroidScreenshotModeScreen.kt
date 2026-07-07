@@ -23,9 +23,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ScreenShare
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material3.Icon
@@ -98,6 +100,7 @@ private fun ScreenshotSceneBody(
       AndroidScreenshotScene.Voice -> VoiceScene()
       AndroidScreenshotScene.Screen -> ScreenScene()
       AndroidScreenshotScene.Settings -> SettingsScene()
+      AndroidScreenshotScene.Cron -> CronScene()
     }
   }
 }
@@ -190,6 +193,23 @@ private fun SettingsScene() {
   CompactList(
     title = "Notifications",
     rows = listOf("Gateway status", "Approval requests", "Background presence"),
+  )
+}
+
+@Composable
+private fun CronScene() {
+  FeaturePanel(icon = Icons.Default.Schedule, title = "Cron job detail", subtitle = "Daily standup · admin access") {
+    MetricRow(label = "Schedule", value = "0 9 * * *")
+    MetricRow(label = "Next wake", value = "6h")
+    MetricRow(label = "Payload", value = "Agent turn")
+  }
+  CompactList(
+    title = "Management",
+    rows = listOf("Run now from Android", "Edit schedule and payload", "Enable, disable, or delete"),
+  )
+  CompactList(
+    title = "Run history",
+    rows = listOf("OK · 128ms", "Skipped · dependency hold", "Issue details preserved"),
   )
 }
 
@@ -322,6 +342,7 @@ private fun ScreenshotTabBar(activeScene: AndroidScreenshotScene) {
       TabIcon(icon = Icons.Default.Mic, active = activeScene == AndroidScreenshotScene.Voice)
       TabIcon(icon = Icons.AutoMirrored.Filled.ScreenShare, active = activeScene == AndroidScreenshotScene.Screen)
       TabIcon(icon = Icons.Default.Settings, active = activeScene == AndroidScreenshotScene.Settings)
+      TabIcon(icon = Icons.Default.Bolt, active = activeScene == AndroidScreenshotScene.Cron)
     }
   }
 }
@@ -399,4 +420,5 @@ private fun sceneTitle(scene: AndroidScreenshotScene): String =
     AndroidScreenshotScene.Voice -> "Talk"
     AndroidScreenshotScene.Screen -> "Device tools"
     AndroidScreenshotScene.Settings -> "Settings"
+    AndroidScreenshotScene.Cron -> "Cron jobs"
   }

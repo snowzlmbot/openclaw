@@ -335,6 +335,13 @@ class GatewayBootstrapAuthTest {
   }
 
   @Test
+  fun operatorHasAdminScopeRequiresExactGrantedScope() {
+    assertTrue(operatorHasAdminScope(listOf("operator.read", " operator.admin ")))
+    assertFalse(operatorHasAdminScope(listOf("operator.read", "operator.write")))
+    assertFalse(operatorHasAdminScope(listOf("operator.administrator")))
+  }
+
+  @Test
   fun operatorSessionUsesStoredDeviceTokenOnlyWithoutExplicitSharedAuth() {
     assertTrue(
       operatorSessionUsesStoredDeviceToken(
