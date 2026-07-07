@@ -1,0 +1,47 @@
+name: Issue 101204 optional TTS SecretRef live proof
+
+on:
+  push:
+    branches:
+      - proof/issue-101204-live
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: mkdir -p .artifacts/issue-101204
+      - name: Run focused secrets and Gateway startup regressions
+        run: |
+          set -o pipefail
+          pnpm test \
+            src/secrets/resolve.test.ts \
+            src/secrets/runtime.test.ts \
+            src/secrets/runtime-config-collectors-tts.test.ts \
+            src/secrets/runtime-discord-surface.test.ts \
+            src/gateway/server-startup-config.secrets.test.ts \
+            src/gateway/server-methods/tts.test.ts \
+            | tee .artifacts/issue-101204/focused-tests.log
+      - name: Run live Gateway proof
+        run: |
+          set -o pipefail
+          node --import tsx scripts/repro/issue-101204-tts-secretref-live-proof.mts | tee .artifacts/issue-101204/live-proof.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue-101204-live-proof-log
+          path: |
+            .artifacts/issue-101204/focused-tests.log
+            .artifacts/issue-101204/live-proof.log
+          if-no-files-found: error
