@@ -2077,6 +2077,13 @@ jobs:
           test -n "$APK"
           ls -lh "$APK"
           adb devices
+          for i in $(seq 1 60); do
+            if adb shell cmd package list packages >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          adb shell cmd package list packages >/dev/null
           adb install -r "$APK"
           cat >/tmp/openclaw.node.xml <<'PREFS'
           <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
