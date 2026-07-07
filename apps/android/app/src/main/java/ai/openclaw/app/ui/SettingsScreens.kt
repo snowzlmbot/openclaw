@@ -10,6 +10,8 @@ import ai.openclaw.app.GatewayConnectionProblem
 import ai.openclaw.app.GatewayCronJobDetail
 import ai.openclaw.app.GatewayCronJobDetailState
 import ai.openclaw.app.GatewayCronJobSummary
+import ai.openclaw.app.GatewayCronJobUpdate
+import ai.openclaw.app.GatewayCronRunSummary
 import ai.openclaw.app.GatewayExecApprovalSummary
 import ai.openclaw.app.GatewayTalkSetupReadiness
 import ai.openclaw.app.GatewayTalkSetupState
@@ -100,7 +102,10 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
@@ -109,9 +114,13 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
@@ -297,10 +306,13 @@ private fun CronJobsSettingsScreen(
           SettingsMetric("Next Wake", formatCronWake(cronStatus.nextWakeAtMs)),
         ),
     )
-    ClawSecondaryButton(text = if (cronRefreshing) "Refreshing" else "Refresh", onClick = viewModel::refreshCronJobs, enabled = isConnected && !cronRefreshing, modifier = Modifier.fillMaxWidth())
-    ClawPanel {
-      Text(text = "Android shows scheduled work status. Create and edit schedules from the desktop app.", style = ClawTheme.type.body, color = ClawTheme.colors.textMuted)
-    }
+    ClawSecondaryButton(
+      text = if (cronRefreshing) "Refreshing" else "Refresh",
+      onClick = viewModel::refreshCronJobs,
+      enabled = isConnected && !cronRefreshing,
+      modifier = Modifier.fillMaxWidth(),
+      icon = Icons.Default.Refresh,
+    )
     cronErrorText?.let { errorText ->
       ClawPanel {
         Text(text = errorText, style = ClawTheme.type.body, color = ClawTheme.colors.warning)
@@ -315,7 +327,7 @@ private fun CronJobsSettingsScreen(
         ClawPanel {
           Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(text = "No scheduled jobs.", style = ClawTheme.type.section, color = ClawTheme.colors.text)
-            Text(text = "Create recurring OpenClaw work from the desktop app.", style = ClawTheme.type.body, color = ClawTheme.colors.textMuted)
+            Text(text = "Scheduled work created on the gateway will appear here.", style = ClawTheme.type.body, color = ClawTheme.colors.textMuted)
           }
         }
       else -> CronJobsPanel(jobs = cronJobs, onJobClick = { selectedJobId = it.id })
@@ -333,7 +345,14 @@ private fun CronJobDetailSettingsScreen(
   BackHandler(onBack = onBack)
 
   val detailState by viewModel.cronJobDetailState.collectAsState()
+  val cronRunHistory by viewModel.cronRunHistory.collectAsState()
+  val cronDetailRefreshing by viewModel.cronDetailRefreshing.collectAsState()
+  val cronActionInProgress by viewModel.cronActionInProgress.collectAsState()
+  val cronActionStatusText by viewModel.cronActionStatusText.collectAsState()
+  val cronMutationAvailable by viewModel.cronMutationAvailable.collectAsState()
+  val cronErrorText by viewModel.cronErrorText.collectAsState()
   val isConnected by viewModel.isConnected.collectAsState()
+  var showDeleteConfirm by remember { mutableStateOf(false) }
 
   DisposableEffect(viewModel, jobId) {
     onDispose { viewModel.clearCronJobDetail() }
@@ -348,9 +367,39 @@ private fun CronJobDetailSettingsScreen(
   val current = (detailState as? GatewayCronJobDetailState.Loaded)?.job?.takeIf { it.id == jobId }
   val loading = (detailState as? GatewayCronJobDetailState.Loading)?.id == jobId
   val errorText = (detailState as? GatewayCronJobDetailState.Error)?.takeIf { it.id == jobId }?.message
+
+  LaunchedEffect(cronActionStatusText) {
+    if (cronActionStatusText == "Cron job deleted.") {
+      onBack()
+    }
+  }
+
+  if (showDeleteConfirm && current != null) {
+    AlertDialog(
+      onDismissRequest = { showDeleteConfirm = false },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            showDeleteConfirm = false
+            viewModel.deleteCronJob(current.id)
+          },
+        ) {
+          Text("Delete")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showDeleteConfirm = false }) {
+          Text("Cancel")
+        }
+      },
+      title = { Text("Delete cron job?") },
+      text = { Text("This removes the scheduled job from the gateway.") },
+    )
+  }
+
   SettingsDetailFrame(
     title = current?.name ?: jobName ?: "Cron Job",
-    subtitle = "Inspect scheduled gateway work.",
+    subtitle = "Inspect, run, and edit scheduled gateway work.",
     icon = Icons.Default.Bolt,
     onBack = onBack,
   ) {
@@ -359,7 +408,19 @@ private fun CronJobDetailSettingsScreen(
       onClick = { viewModel.loadCronJobDetail(jobId) },
       enabled = isConnected && !loading,
       modifier = Modifier.fillMaxWidth(),
+      icon = Icons.Default.Refresh,
     )
+
+    cronActionStatusText?.let { statusText ->
+      ClawPanel {
+        Text(text = statusText, style = ClawTheme.type.body, color = ClawTheme.colors.textMuted)
+      }
+    }
+    cronErrorText?.let { errorText ->
+      ClawPanel {
+        Text(text = errorText, style = ClawTheme.type.body, color = ClawTheme.colors.warning)
+      }
+    }
 
     when {
       !isConnected ->
@@ -374,7 +435,20 @@ private fun CronJobDetailSettingsScreen(
         ClawPanel {
           Text(text = if (loading) "Loading cron job…" else "Cron job not loaded.", style = ClawTheme.type.body, color = ClawTheme.colors.textMuted)
         }
-      else -> CronJobDetailPanel(current)
+      else ->
+        CronJobDetailPanel(
+          job = current,
+          runs = cronRunHistory,
+          loading = loading || cronDetailRefreshing,
+          actionInProgress = cronActionInProgress,
+          mutationAvailable = cronMutationAvailable,
+          onRun = { viewModel.runCronJob(current.id) },
+          onToggleEnabled = { job -> viewModel.setCronJobEnabled(id = job.id, enabled = !job.enabled) },
+          onSave = viewModel::updateCronJob,
+          onRefreshRuns = { viewModel.refreshCronRunHistory(current.id) },
+          onDelete = { showDeleteConfirm = true },
+          onRequestAdminAccess = viewModel::pairNewGateway,
+        )
     }
   }
 }
@@ -1906,7 +1980,7 @@ private fun CronJobListRow(
     title = job.name,
     subtitle = cronJobSubtitle(job),
     modifier = Modifier.clickable(onClick = onClick),
-    leading = { ClawIconBadge(icon = Icons.Default.Bolt) },
+    leading = { ClawIconBadge(icon = if (job.enabled) Icons.Default.Bolt else Icons.Default.Pause) },
     trailing = {
       Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         ClawStatusPill(text = cronJobStatusText(job), status = cronJobStatus(job))
@@ -1919,47 +1993,427 @@ private fun CronJobListRow(
 @Composable
 private fun CronJobDetailPanel(
   job: GatewayCronJobDetail,
+  runs: List<GatewayCronRunSummary>,
+  loading: Boolean,
+  actionInProgress: Boolean,
+  mutationAvailable: Boolean,
+  onRun: () -> Unit,
+  onToggleEnabled: (GatewayCronJobDetail) -> Unit,
+  onSave: (GatewayCronJobUpdate) -> Unit,
+  onRefreshRuns: () -> Unit,
+  onDelete: () -> Unit,
+  onRequestAdminAccess: () -> Unit,
 ) {
+  CronJobDetailSummary(job = job)
+  if (!mutationAvailable) {
+    CronAdminAccessPanel(onRequestAdminAccess = onRequestAdminAccess)
+  }
+  CronJobActionPanel(
+    job = job,
+    actionInProgress = actionInProgress,
+    mutationAvailable = mutationAvailable,
+    onRun = onRun,
+    onToggleEnabled = { onToggleEnabled(job) },
+    onDelete = onDelete,
+  )
+  CronJobEditorPanel(
+    job = job,
+    actionInProgress = actionInProgress,
+    mutationAvailable = mutationAvailable,
+    onSave = onSave,
+  )
+  CronRunHistoryPanel(runs = runs, loading = loading, onRefresh = onRefreshRuns)
+}
+
+@Composable
+private fun CronAdminAccessPanel(onRequestAdminAccess: () -> Unit) {
+  ClawPanel {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+      Text(
+        text = "Admin access required",
+        style = ClawTheme.type.section,
+        color = ClawTheme.colors.text,
+      )
+      Text(
+        text =
+          "Run, edit, enable/disable, and delete use admin-scoped gateway RPCs. " +
+            "Reconnect with an admin-capable setup code or token to manage cron jobs from Android.",
+        style = ClawTheme.type.body,
+        color = ClawTheme.colors.textMuted,
+      )
+      ClawSecondaryButton(
+        text = "Reconnect with admin access",
+        onClick = onRequestAdminAccess,
+        modifier = Modifier.fillMaxWidth(),
+        icon = Icons.Default.QrCode2,
+      )
+    }
+  }
+}
+
+@Composable
+private fun CronJobDetailSummary(job: GatewayCronJobDetail) {
   SettingsMetricPanel(
     rows =
       listOf(
-        SettingsMetric("Status", if (job.enabled) "Enabled" else "Off"),
+        SettingsMetric("Name", job.name),
+        SettingsMetric("Enabled", if (job.enabled) "Yes" else "No"),
         SettingsMetric("Schedule", job.scheduleLabel),
-        SettingsMetric("Next Wake", formatCronWake(job.nextRunAtMs)),
-        SettingsMetric("Last Run", formatCronTimestamp(job.lastRunAtMs)),
+        SettingsMetric("Next", formatCronWake(job.nextRunAtMs)),
+        SettingsMetric("Last", cronLastRunLabel(job)),
       ),
   )
-  CronJobFieldsPanel(
-    rows =
-      listOf(
-        SettingsMetric("ID", job.id, copyable = true),
-        SettingsMetric("Description", job.description.ifBlank { "None" }),
-        SettingsMetric("Schedule Detail", job.scheduleDetail),
-        SettingsMetric("Session Target", job.sessionTarget),
-        SettingsMetric("Wake Mode", job.wakeMode),
-        SettingsMetric("Delete After Run", if (job.deleteAfterRun) "Yes" else "No"),
-        SettingsMetric("Payload", job.payloadLabel),
-        SettingsMetric("Delivery", job.deliveryLabel),
-        SettingsMetric("Failure Alert", job.failureAlertLabel),
-        SettingsMetric("Created", formatCronTimestamp(job.createdAtMs)),
-        SettingsMetric("Updated", formatCronTimestamp(job.updatedAtMs)),
-        SettingsMetric("Running Since", formatCronTimestamp(job.runningAtMs)),
-        SettingsMetric("Last Status", cronJobStatusText(job)),
-        SettingsMetric("Last Duration", job.lastDurationMs?.let { "${it}ms" } ?: "None"),
-        SettingsMetric("Consecutive Errors", job.consecutiveErrors?.toString() ?: "0"),
-        SettingsMetric("Consecutive Skips", job.consecutiveSkipped?.toString() ?: "0"),
-        SettingsMetric("Delivery Status", job.lastDeliveryStatus ?: "None"),
-      ),
+  ClawPanel {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+      Text(
+        text = job.description.ifBlank { "No description." },
+        style = ClawTheme.type.body,
+        color = ClawTheme.colors.textMuted,
+      )
+      Text(
+        text = "Payload: ${cronPayloadKindLabel(job.payloadKind)}",
+        style = ClawTheme.type.caption,
+        color = ClawTheme.colors.textSubtle,
+      )
+      Text(
+        text = job.payloadText?.take(220) ?: "No payload preview.",
+        style = ClawTheme.type.caption,
+        color = ClawTheme.colors.textMuted,
+        maxLines = 4,
+        overflow = TextOverflow.Ellipsis,
+      )
+      job.lastError?.let { error ->
+        Text(
+          text = "Last error: $error",
+          style = ClawTheme.type.caption,
+          color = ClawTheme.colors.warning,
+          maxLines = 3,
+          overflow = TextOverflow.Ellipsis,
+        )
+      }
+      job.lastDiagnosticSummary?.let { diagnostic ->
+        Text(
+          text = "Diagnostic: $diagnostic",
+          style = ClawTheme.type.caption,
+          color = ClawTheme.colors.textSubtle,
+          maxLines = 2,
+          overflow = TextOverflow.Ellipsis,
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun CronJobActionPanel(
+  job: GatewayCronJobDetail,
+  actionInProgress: Boolean,
+  mutationAvailable: Boolean,
+  onRun: () -> Unit,
+  onToggleEnabled: () -> Unit,
+  onDelete: () -> Unit,
+) {
+  val actionEnabled = mutationAvailable && !actionInProgress
+  ClawPanel {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        ClawPrimaryButton(
+          text = if (actionInProgress) "Working" else "Run Now",
+          onClick = onRun,
+          enabled = actionEnabled,
+          modifier = Modifier.weight(1f),
+          icon = Icons.Default.PlayArrow,
+        )
+        ClawSecondaryButton(
+          text = if (job.enabled) "Disable" else "Enable",
+          onClick = onToggleEnabled,
+          enabled = actionEnabled,
+          modifier = Modifier.weight(1f),
+          icon = if (job.enabled) Icons.Default.Pause else Icons.Default.Bolt,
+        )
+      }
+      ClawSecondaryButton(
+        text = "Delete Job",
+        onClick = onDelete,
+        enabled = actionEnabled,
+        modifier = Modifier.fillMaxWidth(),
+        icon = Icons.Default.Delete,
+      )
+    }
+  }
+}
+
+@Composable
+private fun CronJobEditorPanel(
+  job: GatewayCronJobDetail,
+  actionInProgress: Boolean,
+  mutationAvailable: Boolean,
+  onSave: (GatewayCronJobUpdate) -> Unit,
+) {
+  var draft by remember(job.id, job.updatedAtMs) { mutableStateOf(job.toCronEditDraft()) }
+  ClawPanel {
+    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        Icon(
+          imageVector = Icons.Default.Edit,
+          contentDescription = null,
+          modifier = Modifier.size(17.dp),
+          tint = ClawTheme.colors.text,
+        )
+        Text(text = "Edit", style = ClawTheme.type.section, color = ClawTheme.colors.text)
+      }
+      CronEditSwitchRow(
+        title = "Enabled",
+        subtitle = "Allow the scheduler to run this job.",
+        checked = draft.enabled,
+        onCheckedChange = { draft = draft.copy(enabled = it) },
+      )
+      CronEditSwitchRow(
+        title = "Delete after run",
+        subtitle = "Remove this job after a successful one-shot run.",
+        checked = draft.deleteAfterRun,
+        onCheckedChange = { draft = draft.copy(deleteAfterRun = it) },
+      )
+      ClawTextField(
+        value = draft.name,
+        onValueChange = { draft = draft.copy(name = it) },
+        placeholder = "Name",
+      )
+      ClawTextField(
+        value = draft.description,
+        onValueChange = { draft = draft.copy(description = it) },
+        placeholder = "Description",
+        minLines = 2,
+      )
+      ClawSegmentedControl(
+        options = cronScheduleModeOptions,
+        selected = draft.scheduleMode,
+        onSelect = { draft = draft.copy(scheduleMode = it) },
+        modifier = Modifier.fillMaxWidth(),
+      )
+      CronScheduleEditor(draft = draft, onChange = { draft = it })
+      ClawTextField(
+        value = draft.sessionTarget,
+        onValueChange = { draft = draft.copy(sessionTarget = it) },
+        placeholder = "Session target: main, isolated, current, or session:<id>",
+      )
+      ClawSegmentedControl(
+        options = cronWakeModeOptions,
+        selected = draft.wakeMode,
+        onSelect = { draft = draft.copy(wakeMode = it) },
+        modifier = Modifier.fillMaxWidth(),
+      )
+      ClawSegmentedControl(
+        options = cronPayloadKindOptions,
+        selected = draft.payloadKindLabel,
+        onSelect = { label -> draft = draft.withPayloadKind(label) },
+        modifier = Modifier.fillMaxWidth(),
+      )
+      CronPayloadEditor(draft = draft, onChange = { draft = it })
+      ClawPrimaryButton(
+        text = if (actionInProgress) "Saving" else "Save Changes",
+        onClick = { onSave(draft.toCronJobUpdate(job.id)) },
+        enabled = mutationAvailable && !actionInProgress,
+        modifier = Modifier.fillMaxWidth(),
+        icon = Icons.Default.Save,
+      )
+    }
+  }
+}
+
+@Composable
+private fun CronEditSwitchRow(
+  title: String,
+  subtitle: String,
+  checked: Boolean,
+  onCheckedChange: (Boolean) -> Unit,
+) {
+  Row(
+    modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(9.dp),
+  ) {
+    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+      Text(text = title, style = ClawTheme.type.body, color = ClawTheme.colors.text)
+      Text(
+        text = subtitle,
+        style = ClawTheme.type.caption,
+        color = ClawTheme.colors.textMuted,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
+    Switch(checked = checked, onCheckedChange = onCheckedChange)
+  }
+}
+
+@Composable
+private fun CronScheduleEditor(
+  draft: CronEditDraft,
+  onChange: (CronEditDraft) -> Unit,
+) {
+  when (draft.scheduleMode) {
+    "At" ->
+      ClawTextField(
+        value = draft.scheduleAt,
+        onValueChange = { onChange(draft.copy(scheduleAt = it)) },
+        placeholder = "ISO time, e.g. 2026-07-08T09:30:00+08:00",
+      )
+    "Every" ->
+      ClawTextField(
+        value = draft.scheduleEveryMs,
+        onValueChange = { value -> onChange(draft.copy(scheduleEveryMs = value.filter { it.isDigit() })) },
+        placeholder = "Interval in milliseconds",
+      )
+    "On Exit" -> {
+      ClawTextField(
+        value = draft.scheduleCommand,
+        onValueChange = { onChange(draft.copy(scheduleCommand = it)) },
+        placeholder = "Command to watch",
+      )
+      ClawTextField(
+        value = draft.scheduleCwd,
+        onValueChange = { onChange(draft.copy(scheduleCwd = it)) },
+        placeholder = "Working directory (optional)",
+      )
+    }
+    else -> {
+      ClawTextField(
+        value = draft.scheduleCronExpr,
+        onValueChange = { onChange(draft.copy(scheduleCronExpr = it)) },
+        placeholder = "Cron expression, e.g. 0 9 * * *",
+      )
+      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ClawTextField(
+          value = draft.scheduleTimezone,
+          onValueChange = { onChange(draft.copy(scheduleTimezone = it)) },
+          placeholder = "Timezone",
+          modifier = Modifier.weight(1f),
+        )
+        ClawTextField(
+          value = draft.scheduleStaggerMs,
+          onValueChange = { value -> onChange(draft.copy(scheduleStaggerMs = value.filter { it.isDigit() })) },
+          placeholder = "Stagger ms",
+          modifier = Modifier.weight(1f),
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun CronPayloadEditor(
+  draft: CronEditDraft,
+  onChange: (CronEditDraft) -> Unit,
+) {
+  when (draft.payloadKindLabel) {
+    "System" ->
+      ClawTextField(
+        value = draft.payloadText,
+        onValueChange = { onChange(draft.copy(payloadText = it, sessionTarget = "main")) },
+        placeholder = "System event text",
+        minLines = 3,
+      )
+    "Command" -> {
+      ClawTextField(
+        value = draft.payloadCommandArgvJson,
+        onValueChange = { onChange(draft.copy(payloadCommandArgvJson = it)) },
+        placeholder = "Command argv JSON array",
+        minLines = 2,
+      )
+      ClawTextField(
+        value = draft.payloadCommandCwd,
+        onValueChange = { onChange(draft.copy(payloadCommandCwd = it)) },
+        placeholder = "Command cwd (optional)",
+      )
+    }
+    else -> {
+      ClawTextField(
+        value = draft.payloadText,
+        onValueChange = { onChange(draft.copy(payloadText = it)) },
+        placeholder = "Agent message",
+        minLines = 3,
+      )
+      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ClawTextField(
+          value = draft.payloadModel,
+          onValueChange = { onChange(draft.copy(payloadModel = it)) },
+          placeholder = "Model",
+          modifier = Modifier.weight(1f),
+        )
+        ClawTextField(
+          value = draft.payloadThinking,
+          onValueChange = { onChange(draft.copy(payloadThinking = it)) },
+          placeholder = "Thinking",
+          modifier = Modifier.weight(1f),
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun CronRunHistoryPanel(
+  runs: List<GatewayCronRunSummary>,
+  loading: Boolean,
+  onRefresh: () -> Unit,
+) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    Icon(
+      imageVector = Icons.Default.History,
+      contentDescription = null,
+      modifier = Modifier.size(17.dp),
+      tint = ClawTheme.colors.text,
+    )
+    Text(
+      text = "Run History",
+      style = ClawTheme.type.section,
+      color = ClawTheme.colors.text,
+      modifier = Modifier.weight(1f),
+    )
+    ClawSecondaryButton(
+      text = if (loading) "Loading" else "Reload",
+      onClick = onRefresh,
+      enabled = !loading,
+      icon = Icons.Default.Refresh,
+    )
+  }
+  if (runs.isEmpty()) {
+    ClawPanel {
+      Text(
+        text = if (loading) "Loading run history…" else "No run history yet.",
+        style = ClawTheme.type.body,
+        color = ClawTheme.colors.textMuted,
+      )
+    }
+  } else {
+    ClawListPanel(items = runs) { run -> CronRunHistoryRow(run = run) }
+  }
+}
+
+@Composable
+private fun CronRunHistoryRow(run: GatewayCronRunSummary) {
+  ClawDetailRow(
+    title = cronRunTitle(run),
+    subtitle = cronRunSubtitle(run),
+    leading = { ClawIconBadge(icon = Icons.Default.Schedule) },
+    trailing = {
+      ClawStatusPill(
+        text = cronRunStatusText(run.status),
+        status = cronRunStatus(run.status),
+      )
+    },
   )
-  job.payloadText?.let { text ->
-    CronJobTextPanel(title = cronPayloadTextTitle(job), text = text)
-  }
-  job.lastError?.let { text ->
-    CronJobTextPanel(title = "Last Error", text = text, warning = true)
-  }
-  job.lastDeliveryError?.let { text ->
-    CronJobTextPanel(title = "Delivery Error", text = text, warning = true)
-  }
 }
 
 @Composable
@@ -2202,6 +2656,165 @@ private fun cronPayloadTextTitle(job: GatewayCronJobDetail): String =
     "agentTurn" -> "Agent Prompt"
     "command" -> "Command"
     else -> "Payload Text"
+  }
+
+private val cronScheduleModeOptions = listOf("Cron", "Every", "At", "On Exit")
+private val cronWakeModeOptions = listOf("next-heartbeat", "now")
+private val cronPayloadKindOptions = listOf("Agent", "System", "Command")
+
+private data class CronEditDraft(
+  val name: String,
+  val description: String,
+  val enabled: Boolean,
+  val deleteAfterRun: Boolean,
+  val scheduleMode: String,
+  val scheduleAt: String,
+  val scheduleEveryMs: String,
+  val scheduleCronExpr: String,
+  val scheduleTimezone: String,
+  val scheduleStaggerMs: String,
+  val scheduleCommand: String,
+  val scheduleCwd: String,
+  val sessionTarget: String,
+  val wakeMode: String,
+  val payloadKindLabel: String,
+  val payloadText: String,
+  val payloadModel: String,
+  val payloadThinking: String,
+  val payloadCommandArgvJson: String,
+  val payloadCommandCwd: String,
+)
+
+private fun GatewayCronJobDetail.toCronEditDraft(): CronEditDraft =
+  CronEditDraft(
+    name = name,
+    description = description,
+    enabled = enabled,
+    deleteAfterRun = deleteAfterRun,
+    scheduleMode = scheduleModeLabel(scheduleKind),
+    scheduleAt = scheduleAt.orEmpty(),
+    scheduleEveryMs = scheduleEveryMs?.toString().orEmpty(),
+    scheduleCronExpr = scheduleCronExpr.orEmpty(),
+    scheduleTimezone = scheduleTimezone.orEmpty(),
+    scheduleStaggerMs = scheduleStaggerMs?.toString().orEmpty(),
+    scheduleCommand = scheduleCommand.orEmpty(),
+    scheduleCwd = scheduleCwd.orEmpty(),
+    sessionTarget = sessionTarget,
+    wakeMode = wakeMode,
+    payloadKindLabel = payloadKindLabel(payloadKind),
+    payloadText = payloadText.orEmpty(),
+    payloadModel = payloadModel.orEmpty(),
+    payloadThinking = payloadThinking.orEmpty(),
+    payloadCommandArgvJson = payloadCommandArgvJson.orEmpty(),
+    payloadCommandCwd = payloadCommandCwd.orEmpty(),
+  )
+
+private fun CronEditDraft.toCronJobUpdate(id: String): GatewayCronJobUpdate =
+  GatewayCronJobUpdate(
+    id = id,
+    name = name,
+    description = description,
+    enabled = enabled,
+    deleteAfterRun = deleteAfterRun,
+    scheduleKind = scheduleKindValue(scheduleMode),
+    scheduleAt = scheduleAt,
+    scheduleEveryMs = scheduleEveryMs.toLongOrNull(),
+    scheduleCronExpr = scheduleCronExpr,
+    scheduleTimezone = scheduleTimezone,
+    scheduleStaggerMs = scheduleStaggerMs.toLongOrNull(),
+    scheduleCommand = scheduleCommand,
+    scheduleCwd = scheduleCwd,
+    sessionTarget = sessionTarget,
+    wakeMode = wakeMode,
+    payloadKind = payloadKindValue(payloadKindLabel),
+    payloadText = payloadText,
+    payloadModel = payloadModel,
+    payloadThinking = payloadThinking,
+    payloadCommandArgvJson = payloadCommandArgvJson,
+    payloadCommandCwd = payloadCommandCwd,
+  )
+
+private fun CronEditDraft.withPayloadKind(label: String): CronEditDraft =
+  when (label) {
+    "System" -> copy(payloadKindLabel = label, sessionTarget = "main")
+    "Agent" ->
+      copy(
+        payloadKindLabel = label,
+        sessionTarget = if (sessionTarget == "main") "isolated" else sessionTarget,
+      )
+    else -> copy(payloadKindLabel = label)
+  }
+
+private fun scheduleModeLabel(kind: String): String =
+  when (kind.lowercase()) {
+    "at" -> "At"
+    "every" -> "Every"
+    "on-exit" -> "On Exit"
+    else -> "Cron"
+  }
+
+private fun scheduleKindValue(label: String): String =
+  when (label) {
+    "At" -> "at"
+    "Every" -> "every"
+    "On Exit" -> "on-exit"
+    else -> "cron"
+  }
+
+private fun payloadKindLabel(kind: String): String =
+  when (kind) {
+    "systemEvent" -> "System"
+    "command" -> "Command"
+    else -> "Agent"
+  }
+
+private fun payloadKindValue(label: String): String =
+  when (label) {
+    "System" -> "systemEvent"
+    "Command" -> "command"
+    else -> "agentTurn"
+  }
+
+private fun cronPayloadKindLabel(kind: String): String =
+  when (kind) {
+    "systemEvent" -> "system event"
+    "agentTurn" -> "agent turn"
+    "command" -> "command"
+    else -> kind.ifBlank { "unknown" }
+  }
+
+private fun cronLastRunLabel(job: GatewayCronJobDetail): String {
+  val status = job.lastRunStatus ?: "none"
+  val last = formatCronWake(job.lastRunAtMs)
+  return if (job.lastRunAtMs == null) status else "$status · $last"
+}
+
+private fun cronRunTitle(run: GatewayCronRunSummary): String =
+  run.runId?.takeIf { it.isNotBlank() }?.let { "Run ${it.take(8)}" }
+    ?: "Run ${formatCronWake(run.ts)}"
+
+private fun cronRunSubtitle(run: GatewayCronRunSummary): String {
+  val result = run.error ?: run.summary
+  val duration = run.durationMs?.let { "${it}ms" }
+  return listOfNotNull(formatCronWake(run.ts), duration, run.deliveryStatus, run.sessionKey, run.model, result)
+    .joinToString(" · ")
+    .ifBlank { "No details" }
+}
+
+private fun cronRunStatusText(status: String?): String =
+  when (status?.lowercase()) {
+    "ok" -> "OK"
+    "error" -> "Issue"
+    "skipped" -> "Skipped"
+    else -> "Unknown"
+  }
+
+private fun cronRunStatus(status: String?): ClawStatus =
+  when (status?.lowercase()) {
+    "ok" -> ClawStatus.Success
+    "error" -> ClawStatus.Danger
+    "skipped" -> ClawStatus.Warning
+    else -> ClawStatus.Neutral
   }
 
 /** Applies query/system visibility rules while always preserving selected packages. */

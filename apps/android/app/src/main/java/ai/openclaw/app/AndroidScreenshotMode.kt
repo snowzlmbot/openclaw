@@ -13,6 +13,7 @@ enum class AndroidScreenshotScene(
   Chat("chat", HomeDestination.Chat),
   Voice("voice", HomeDestination.Voice),
   Settings("settings", HomeDestination.Settings),
+  Cron("cron", HomeDestination.CronJobs),
   ;
 
   companion object {

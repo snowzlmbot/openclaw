@@ -20,6 +20,7 @@ enum class HomeDestination {
   Voice,
   Screen,
   Settings,
+  CronJobs,
 }
 
 /**

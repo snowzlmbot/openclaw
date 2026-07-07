@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/android-screenshots.sh [--device <adb-serial>] [--avd <name>] [--locale en-US] [--skip-build] [--skip-install] [--keep-emulator] [--dry-run]
+  scripts/android-screenshots.sh [--device <adb-serial>] [--avd <name>] [--locale en-US] [--scene <scene>] [--skip-build] [--skip-install] [--keep-emulator] [--dry-run]
 
 Builds and installs the Play debug app on an emulator, launches production screens
 with deterministic local fixture state, and writes Google Play screenshots under:
@@ -37,7 +37,8 @@ KEEP_EMULATOR="${ANDROID_SCREENSHOT_KEEP_EMULATOR:-0}"
 SKIP_BUILD=0
 SKIP_INSTALL=0
 DRY_RUN=0
-SCENES=(home chat voice settings)
+SCENES=(home chat voice settings cron)
+CUSTOM_SCENES=()
 EMULATOR_PID=""
 EMULATOR_LOG=""
 STARTED_EMULATOR=0
@@ -63,6 +64,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --locale)
       LOCALE="${2:-}"
+      shift 2
+      ;;
+    --scene)
+      CUSTOM_SCENES+=("${2:-}")
       shift 2
       ;;
     --skip-build)
@@ -92,6 +97,10 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "${#CUSTOM_SCENES[@]}" -gt 0 ]]; then
+  SCENES=("${CUSTOM_SCENES[@]}")
+fi
 
 validate_locale() {
   local locale="$1"
@@ -306,6 +315,14 @@ wait_for_boot_completed() {
   return 1
 }
 
+print_emulator_log_tail() {
+  if [[ -n "${EMULATOR_LOG:-}" && -f "$EMULATOR_LOG" ]]; then
+    echo "--- Android emulator log tail ---" >&2
+    tail -n "${ANDROID_SCREENSHOT_EMULATOR_LOG_LINES:-160}" "$EMULATOR_LOG" >&2 || true
+    echo "--- end Android emulator log tail ---" >&2
+  fi
+}
+
 wait_for_explicit_device() {
   local adb="$1"
   local serial="$2"
@@ -402,8 +419,14 @@ boot_emulator() {
   EMULATOR_PID="$!"
   STARTED_EMULATOR=1
 
-  serial="$(wait_for_single_device "$adb")"
-  wait_for_boot_completed "$adb" "$serial"
+  if ! serial="$(wait_for_single_device "$adb")"; then
+    print_emulator_log_tail
+    return 1
+  fi
+  if ! wait_for_boot_completed "$adb" "$serial"; then
+    print_emulator_log_tail
+    return 1
+  fi
   stabilize_device_for_screenshots "$adb" "$serial"
   ADB_SERIAL="$serial"
 }
@@ -455,6 +478,7 @@ scene_ready_text() {
     chat) printf '%s\n' "Ready when you are" ;;
     voice) printf '%s\n' "Ready to talk" ;;
     settings) printf '%s\n' "OpenClaw mobile" ;;
+    cron) printf '%s\n' "Cron Jobs" ;;
     *)
       echo "Unknown Android screenshot scene: $1" >&2
       return 1
