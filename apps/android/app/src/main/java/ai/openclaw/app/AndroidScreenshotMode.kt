@@ -13,6 +13,7 @@ enum class AndroidScreenshotScene(
   Voice("voice"),
   Screen("screen"),
   Settings("settings"),
+  Cron("cron"),
   ;
 
   companion object {

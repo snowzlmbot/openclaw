@@ -133,7 +133,12 @@ class MainViewModel(
   val gatewayAgents: StateFlow<List<GatewayAgentSummary>> = runtimeState(initial = emptyList()) { it.gatewayAgents }
   val cronStatus: StateFlow<GatewayCronStatus> = runtimeState(initial = GatewayCronStatus(enabled = false, jobs = 0, nextWakeAtMs = null)) { it.cronStatus }
   val cronJobs: StateFlow<List<GatewayCronJobSummary>> = runtimeState(initial = emptyList()) { it.cronJobs }
+  val cronJobDetail: StateFlow<GatewayCronJobDetail?> = runtimeState(initial = null) { it.cronJobDetail }
+  val cronRunHistory: StateFlow<List<GatewayCronRunSummary>> = runtimeState(initial = emptyList()) { it.cronRunHistory }
   val cronRefreshing: StateFlow<Boolean> = runtimeState(initial = false) { it.cronRefreshing }
+  val cronDetailRefreshing: StateFlow<Boolean> = runtimeState(initial = false) { it.cronDetailRefreshing }
+  val cronActionInProgress: StateFlow<Boolean> = runtimeState(initial = false) { it.cronActionInProgress }
+  val cronActionStatusText: StateFlow<String?> = runtimeState(initial = null) { it.cronActionStatusText }
   val cronErrorText: StateFlow<String?> = runtimeState(initial = null) { it.cronErrorText }
   val usageSummary: StateFlow<GatewayUsageSummary> = runtimeState(initial = GatewayUsageSummary(updatedAtMs = null, providers = emptyList())) { it.usageSummary }
   val usageRefreshing: StateFlow<Boolean> = runtimeState(initial = false) { it.usageRefreshing }
@@ -539,6 +544,37 @@ class MainViewModel(
 
   fun refreshCronJobs() {
     ensureRuntime().refreshCronJobs()
+  }
+
+  fun loadCronJobDetail(id: String) {
+    ensureRuntime().loadCronJobDetail(id)
+  }
+
+  fun refreshCronRunHistory(id: String) {
+    ensureRuntime().refreshCronRunHistory(id)
+  }
+
+  fun clearCronJobDetail() {
+    ensureRuntime().clearCronJobDetail()
+  }
+
+  fun runCronJob(id: String) {
+    ensureRuntime().runCronJob(id)
+  }
+
+  fun setCronJobEnabled(
+    id: String,
+    enabled: Boolean,
+  ) {
+    ensureRuntime().setCronJobEnabled(id = id, enabled = enabled)
+  }
+
+  fun updateCronJob(update: GatewayCronJobUpdate) {
+    ensureRuntime().updateCronJob(update)
+  }
+
+  fun deleteCronJob(id: String) {
+    ensureRuntime().deleteCronJob(id)
   }
 
   fun refreshUsage() {
