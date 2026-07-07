@@ -759,7 +759,14 @@ export function createSessionCapability(gateway: SessionGateway): SessionCapabil
         }
         return null;
       }
-      await refresh({ agentId: options.agentId, force: true });
+      const patchRefreshOptions: SessionListOptions = { ...lastListOptions };
+      delete patchRefreshOptions.append;
+      delete patchRefreshOptions.offset;
+      await refresh({
+        ...patchRefreshOptions,
+        agentId: options.agentId ?? patchRefreshOptions.agentId,
+        force: true,
+      });
       if (hasModelPatch) {
         setModelOverride(key, patchParams.model);
       }

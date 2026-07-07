@@ -24,7 +24,7 @@ function deferred<T>() {
 
 describe("createSessionCapability", () => {
   it("passes transcript fork parameters to sessions.create", async () => {
-    const request = vi.fn(async (method: string) => {
+    const request = vi.fn(async (method: string, _params?: unknown) => {
       if (method === "sessions.create") {
         return { key: "agent:main:forked" };
       }
@@ -64,7 +64,7 @@ describe("createSessionCapability", () => {
   it("keeps background hydration non-blocking and retains an omitted selected row", async () => {
     const secondList = deferred<SessionsListResult>();
     let listCalls = 0;
-    const request = vi.fn(async (method: string) => {
+    const request = vi.fn(async (method: string, _params?: unknown) => {
       if (method !== "sessions.list") {
         throw new Error(`Unexpected request: ${method}`);
       }
@@ -115,6 +115,139 @@ describe("createSessionCapability", () => {
       expect.objectContaining({ key: "agent:main:oldest", label: "Oldest" }),
     ]);
     stop();
+    sessions.dispose();
+  });
+
+  it("preserves derived-title hydration when refreshing after session patches", async () => {
+    const key = "agent:main:untitled";
+    const request = vi.fn(async (method: string, _params?: unknown) => {
+      if (method === "sessions.list") {
+        return sessionsResult(
+          [
+            {
+              key,
+              kind: "direct",
+              updatedAt: 1,
+              label: key,
+              derivedTitle: "Readable planning title",
+            },
+          ],
+          1,
+        );
+      }
+      if (method === "sessions.patch") {
+        return { ok: true };
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const client = { request } as unknown as GatewayBrowserClient;
+    const sessions = createSessionCapability({
+      snapshot: {
+        client,
+        connected: true,
+        sessionKey: key,
+        assistantAgentId: "main",
+        hello: null,
+      },
+      subscribe: () => () => undefined,
+      subscribeEvents: () => () => undefined,
+    });
+
+    await sessions.refresh({
+      agentId: "main",
+      activeMinutes: 0,
+      limit: 50,
+      includeGlobal: true,
+      includeUnknown: true,
+      configuredAgentsOnly: true,
+      includeDerivedTitles: true,
+      force: true,
+    });
+    await sessions.patch(key, { pinned: true }, { agentId: "main" });
+
+    const listCalls = request.mock.calls.filter(([method]) => method === "sessions.list");
+    expect(listCalls).toHaveLength(2);
+    expect(listCalls[1]?.[1]).toMatchObject({
+      agentId: "main",
+      includeGlobal: true,
+      includeUnknown: true,
+      configuredAgentsOnly: true,
+      includeDerivedTitles: true,
+      limit: 50,
+    });
+    expect(request).toHaveBeenCalledWith("sessions.patch", {
+      key,
+      agentId: "main",
+      pinned: true,
+    });
+    sessions.dispose();
+  });
+
+  it("drops pagination while preserving filters when refreshing after session patches", async () => {
+    const key = "agent:main:page-b";
+    const request = vi.fn(async (method: string, _params?: unknown) => {
+      if (method === "sessions.list") {
+        return sessionsResult(
+          [
+            {
+              key,
+              kind: "direct",
+              updatedAt: 2,
+              label: key,
+              derivedTitle: "Readable second-page title",
+            },
+          ],
+          2,
+        );
+      }
+      if (method === "sessions.patch") {
+        return { ok: true };
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const client = { request } as unknown as GatewayBrowserClient;
+    const sessions = createSessionCapability({
+      snapshot: {
+        client,
+        connected: true,
+        sessionKey: key,
+        assistantAgentId: "main",
+        hello: null,
+      },
+      subscribe: () => () => undefined,
+      subscribeEvents: () => () => undefined,
+    });
+
+    const baseListOptions = {
+      agentId: "main",
+      activeMinutes: 0,
+      limit: 1,
+      includeGlobal: true,
+      includeUnknown: true,
+      configuredAgentsOnly: true,
+      includeDerivedTitles: true,
+      force: true,
+    };
+    await sessions.refresh(baseListOptions);
+    await sessions.refresh({
+      ...baseListOptions,
+      offset: 1,
+      append: true,
+    });
+    await sessions.patch(key, { unread: false }, { agentId: "main" });
+
+    const listCalls = request.mock.calls.filter(([method]) => method === "sessions.list");
+    expect(listCalls).toHaveLength(3);
+    expect(listCalls[2]?.[1]).toMatchObject({
+      agentId: "main",
+      limit: 1,
+      includeGlobal: true,
+      includeUnknown: true,
+      configuredAgentsOnly: true,
+      includeDerivedTitles: true,
+    });
+    expect(listCalls[2]?.[1]).not.toHaveProperty("append");
+    expect(listCalls[2]?.[1]).not.toHaveProperty("offset");
     sessions.dispose();
   });
 

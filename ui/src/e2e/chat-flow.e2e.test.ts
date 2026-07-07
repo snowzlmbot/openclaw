@@ -1874,6 +1874,108 @@ describeControlUiE2e("Control UI mocked Gateway E2E", () => {
     }
   });
 
+  it("keeps derived sidebar titles and accessible state after session patch refreshes", async () => {
+    const context = await newBrowserContext({
+      locale: "en-US",
+      serviceWorkers: "block",
+      viewport: { height: 900, width: 1280 },
+    });
+    const page = await context.newPage();
+    const initialKey = "agent:main:session-a";
+    const key = "agent:main:session-b";
+    const readableTitle = "Readable planning title";
+    const sessionsWithDerivedTitle = chatSessionListResponse([
+      {
+        key: initialKey,
+        kind: "direct",
+        label: initialKey,
+        displayName: initialKey,
+        derivedTitle: "Initial readable title",
+        updatedAt: 3,
+      },
+      {
+        key,
+        kind: "direct",
+        label: key,
+        displayName: key,
+        derivedTitle: readableTitle,
+        updatedAt: 2,
+      },
+    ]);
+    const sessionsWithoutDerivedTitle = chatSessionListResponse([
+      {
+        key: initialKey,
+        kind: "direct",
+        label: initialKey,
+        displayName: initialKey,
+        updatedAt: 3,
+      },
+      {
+        key,
+        kind: "direct",
+        label: key,
+        displayName: key,
+        updatedAt: 2,
+      },
+    ]);
+    const gateway = await installMockGateway(page, {
+      methodResponses: {
+        "sessions.list": {
+          cases: [
+            { match: { includeDerivedTitles: true }, response: sessionsWithDerivedTitle },
+            { match: {}, response: sessionsWithoutDerivedTitle },
+          ],
+        },
+      },
+      models: [
+        { id: "gpt-5.5", name: "GPT-5.5", provider: "openai" },
+        { id: "claude-opus-4.5", name: "Claude Opus 4.5", provider: "bedrock" },
+      ],
+      sessionKey: initialKey,
+    });
+
+    try {
+      await page.goto(`${server.baseUrl}chat`);
+      const row = page.locator(`.sidebar-recent-session[data-session-key="${key}"]`);
+      await row.locator("a.sidebar-recent-session__link").click();
+      await expect
+        .poll(async () => {
+          const requests = await gateway.getRequests("sessions.list");
+          return requests.map((request) => request.params);
+        })
+        .toContainEqual(expect.objectContaining({ includeDerivedTitles: true }));
+      const label = row.locator(".sidebar-recent-session__name");
+      await expect.poll(() => label.textContent()).toBe(readableTitle);
+      expect(await row.getAttribute("aria-label")).toContain(readableTitle);
+      expect(await row.locator("a.sidebar-recent-session__link").getAttribute("aria-current")).toBe(
+        "page",
+      );
+
+      const listCountBeforePatch = (await gateway.getRequests("sessions.list")).length;
+      const main = page.getByRole("main");
+      await main.locator('[data-chat-model-select="true"]').first().click();
+      await main.locator('[data-chat-model-provider="bedrock"]').click();
+      await main.locator('[data-chat-model-option="bedrock/claude-opus-4.5"]').click();
+      await main.getByRole("button", { name: "Save", exact: true }).click();
+
+      const patchRequest = await gateway.waitForRequest("sessions.patch");
+      expect(requireRecord(patchRequest.params)).toMatchObject({
+        key,
+        model: "bedrock/claude-opus-4.5",
+      });
+      await expect
+        .poll(async () => {
+          const requests = await gateway.getRequests("sessions.list");
+          return requests.slice(listCountBeforePatch).map((request) => request.params);
+        })
+        .toContainEqual(expect.objectContaining({ includeDerivedTitles: true }));
+      await expect.poll(() => label.textContent()).toBe(readableTitle);
+      expect(await row.getAttribute("aria-label")).toContain("Active");
+    } finally {
+      await closeBrowserContext(context);
+    }
+  });
+
   it("keeps long sidebar labels clipped after a session switch", async () => {
     const context = await newBrowserContext({
       locale: "en-US",
