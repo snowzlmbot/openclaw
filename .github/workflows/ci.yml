@@ -1993,7 +1993,7 @@ jobs:
       contents: read
     name: android-app-session-media-proof
     needs: [preflight]
-    if: github.event_name == 'workflow_dispatch' && inputs.include_android && needs.preflight.outputs.run_android_job == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.include_android
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
