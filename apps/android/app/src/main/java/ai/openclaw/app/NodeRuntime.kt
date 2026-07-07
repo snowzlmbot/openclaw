@@ -506,14 +506,14 @@ class NodeRuntime(
   private val connectAttemptSeq = AtomicLong(0)
 
   /**
-   * Builds the node-owned session key from stable device identity plus optional active agent.
+   * Builds the Android app-owned session key from stable device identity plus optional active agent.
    */
-  private fun resolveNodeMainSessionKey(agentId: String? = null): String {
+  private fun resolveOpenClawAppSessionKey(agentId: String? = null): String {
     val deviceId = identityStore.loadOrCreate().deviceId
-    return buildNodeMainSessionKey(deviceId, agentId)
+    return buildOpenClawAppSessionKey(deviceId, agentId)
   }
 
-  private val _mainSessionKey = MutableStateFlow(resolveNodeMainSessionKey())
+  private val _mainSessionKey = MutableStateFlow(resolveOpenClawAppSessionKey())
   val mainSessionKey: StateFlow<String> = _mainSessionKey.asStateFlow()
 
   private val cameraHudSeq = AtomicLong(0)
@@ -633,6 +633,10 @@ class NodeRuntime(
   private var operatorConnectionProblem: GatewayConnectionProblem? = null
   private var nodeConnectionProblem: GatewayConnectionProblem? = null
   private val gatewayStatusLock = Any()
+  private val openClawAppSessionCreateInFlight =
+    Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+  private val openClawAppSessionCreateSucceeded =
+    Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
 
   private val operatorSession =
     GatewaySession(
@@ -645,13 +649,14 @@ class NodeRuntime(
         _gatewayVersion.value = hello.serverVersion
         _gatewayUpdateAvailable.value = hello.updateAvailable
         _seamColorArgb.value = DEFAULT_SEAM_COLOR_ARGB
-        syncMainSessionKey(resolveAgentIdFromMainSessionKey(hello.mainSessionKey))
+        val helloAgentId = resolveAgentIdFromMainSessionKey(hello.mainSessionKey)
         updateStatus {
           operatorConnectionProblem = null
           operatorConnected = true
           operatorStatusText = "Connected"
         }
         micCapture.onGatewayConnectionChanged(true)
+        syncMainSessionKey(helloAgentId)
         scope.launch {
           subscribeOperatorSessionEvents()
           refreshExecApprovalsFromGateway()
@@ -969,16 +974,66 @@ class NodeRuntime(
   val talkModeConversation: StateFlow<List<VoiceConversationEntry>>
     get() = talkMode.conversation
 
-  private fun syncMainSessionKey(agentId: String?) {
-    val resolvedKey = resolveNodeMainSessionKey(agentId)
+  private fun syncMainSessionKey(agentId: String?): String {
+    val resolvedKey = resolveOpenClawAppSessionKey(agentId)
     // Always push the resolved session key into TalkMode, even when the
     // state flow value is unchanged, so lazy TalkMode instances do not
     // stay on the default "main" session key.
     talkMode.setMainSessionKey(resolvedKey)
-    if (_mainSessionKey.value == resolvedKey) return
+    if (_mainSessionKey.value == resolvedKey) {
+      ensureOpenClawAppSessionAsync(resolvedKey)
+      return resolvedKey
+    }
     _mainSessionKey.value = resolvedKey
-    chat.applyMainSessionKey(resolvedKey)
+    ensureOpenClawAppSessionAsync(resolvedKey)
     updateHomeCanvasState()
+    return resolvedKey
+  }
+
+  private fun ensureOpenClawAppSessionAsync(sessionKey: String) {
+    val key = sessionKey.trim()
+    if (key.isEmpty()) return
+    if (openClawAppSessionCreateSucceeded.contains(key)) {
+      chat.applyMainSessionKey(key)
+      return
+    }
+    if (!openClawAppSessionCreateInFlight.add(key)) {
+      return
+    }
+    scope.launch {
+      var created = false
+      try {
+        ensureOpenClawAppSession(key)
+        created = true
+      } catch (err: Throwable) {
+        Log.d(
+          "OpenClawRuntime",
+          "OpenClaw App session create failed: ${err.message ?: err::class.java.simpleName}",
+        )
+      } finally {
+        openClawAppSessionCreateInFlight.remove(key)
+        if (created) {
+          openClawAppSessionCreateSucceeded.add(key)
+        }
+        if (_mainSessionKey.value == key) {
+          chat.applyMainSessionKey(key)
+        }
+      }
+    }
+  }
+
+  private suspend fun ensureOpenClawAppSession(sessionKey: String) {
+    val agentId =
+      resolveAgentIdFromMainSessionKey(sessionKey)
+        ?: gatewayDefaultAgentId.value
+        ?: "main"
+    val params =
+      buildJsonObject {
+        put("key", JsonPrimitive(sessionKey))
+        put("agentId", JsonPrimitive(agentId))
+        put("label", JsonPrimitive(buildOpenClawAppSessionLabel(prefs.displayName.value)))
+      }.toString()
+    operatorSession.request("sessions.create", params, timeoutMs = 20_000)
   }
 
   private fun updateStatus(update: () -> Unit = {}) {

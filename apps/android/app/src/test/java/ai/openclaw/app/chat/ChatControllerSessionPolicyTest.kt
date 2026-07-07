@@ -12,11 +12,11 @@ class ChatControllerSessionPolicyTest {
       applyMainSessionKey(
         currentSessionKey = "main",
         appliedMainSessionKey = "main",
-        nextMainSessionKey = "agent:ops:node-device",
+        nextMainSessionKey = "agent:ops:openclaw-app-device",
       )
 
-    assertEquals("agent:ops:node-device", state.currentSessionKey)
-    assertEquals("agent:ops:node-device", state.appliedMainSessionKey)
+    assertEquals("agent:ops:openclaw-app-device", state.currentSessionKey)
+    assertEquals("agent:ops:openclaw-app-device", state.appliedMainSessionKey)
   }
 
   @Test
@@ -24,12 +24,12 @@ class ChatControllerSessionPolicyTest {
     val state =
       applyMainSessionKey(
         currentSessionKey = "custom",
-        appliedMainSessionKey = "agent:ops:node-old",
-        nextMainSessionKey = "agent:ops:node-new",
+        appliedMainSessionKey = "agent:ops:openclaw-app-old",
+        nextMainSessionKey = "agent:ops:openclaw-app-new",
       )
 
     assertEquals("custom", state.currentSessionKey)
-    assertEquals("agent:ops:node-new", state.appliedMainSessionKey)
+    assertEquals("agent:ops:openclaw-app-new", state.appliedMainSessionKey)
   }
 
   @Test

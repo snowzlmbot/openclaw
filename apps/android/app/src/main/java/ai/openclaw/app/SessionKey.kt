@@ -17,11 +17,27 @@ internal fun resolveAgentIdFromMainSessionKey(raw: String?): String? {
     .ifEmpty { null }
 }
 
-/** Builds the node session key shape consumed by gateway chat and presence APIs. */
-internal fun buildNodeMainSessionKey(
+private const val OPENCLAW_APP_SESSION_LABEL = "OpenClaw App"
+
+private fun normalizeAgentIdForSessionKey(agentId: String?): String =
+  agentId?.trim().orEmpty().ifEmpty { "main" }
+
+/** Builds the Android app-owned chat session key consumed by gateway chat and presence APIs. */
+internal fun buildOpenClawAppSessionKey(
   deviceId: String,
   agentId: String?,
 ): String {
-  val resolvedAgentId = agentId?.trim().orEmpty().ifEmpty { "main" }
-  return "agent:$resolvedAgentId:node-${deviceId.take(12)}"
+  val resolvedAgentId = normalizeAgentIdForSessionKey(agentId)
+  return "agent:$resolvedAgentId:openclaw-app-${deviceId.take(12)}"
+}
+
+/** Human-readable label applied when the Android app creates/adopts its dedicated session. */
+internal fun buildOpenClawAppSessionLabel(displayName: String?): String {
+  val suffix =
+    displayName
+      ?.trim()
+      ?.take(96)
+      ?.takeIf { it.isNotEmpty() }
+      ?: return OPENCLAW_APP_SESSION_LABEL
+  return "$OPENCLAW_APP_SESSION_LABEL · $suffix"
 }

@@ -6,10 +6,23 @@ import org.junit.Test
 
 class SessionKeyTest {
   @Test
-  fun buildNodeMainSessionKeyUsesStableDeviceScopedSuffix() {
-    val key = buildNodeMainSessionKey(deviceId = "1234567890abcdef", agentId = "ops")
+  fun buildOpenClawAppSessionKeyUsesStableDeviceScopedSuffix() {
+    val key = buildOpenClawAppSessionKey(deviceId = "1234567890abcdef", agentId = "ops")
 
-    assertEquals("agent:ops:node-1234567890ab", key)
+    assertEquals("agent:ops:openclaw-app-1234567890ab", key)
+  }
+
+  @Test
+  fun buildOpenClawAppSessionKeyDefaultsToMainAgent() {
+    val key = buildOpenClawAppSessionKey(deviceId = "1234567890abcdef", agentId = " ")
+
+    assertEquals("agent:main:openclaw-app-1234567890ab", key)
+  }
+
+  @Test
+  fun buildOpenClawAppSessionLabelIncludesDeviceDisplayName() {
+    assertEquals("OpenClaw App", buildOpenClawAppSessionLabel(null))
+    assertEquals("OpenClaw App · Pixel", buildOpenClawAppSessionLabel(" Pixel "))
   }
 
   @Test
