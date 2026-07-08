@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout PR head source
-        uses: actions/checkout@df4cb6f95a9a5a2e38a7a3ce29c2d3a06d6f1d8b
+        uses: actions/checkout@v4
         with:
           ref: ${{ env.TARGET_REF }}
           fetch-depth: 1
@@ -47,7 +47,7 @@ jobs:
           } | tee proof-output/proof-target.txt
 
       - name: Set up Java
-        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
@@ -373,7 +373,7 @@ jobs:
 
       - name: Upload real Android media proof artifact
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@v4
         with:
           name: pr-101912-real-android-models-media-proof-${{ steps.target.outputs.sha }}
           path: proof-output/**
