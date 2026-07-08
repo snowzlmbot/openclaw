@@ -315,7 +315,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "no" | avdmanager create avd -n "${AVD_NAME}" -k "system-images;android-${API_LEVEL};google_apis;x86_64" --device "pixel_6" --force
+          echo "no" | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n "${AVD_NAME}" -k "system-images;android-${API_LEVEL};google_apis;x86_64" --device "pixel_6" --force
 
       - name: Capture real UI media in emulator
         shell: bash
