@@ -99,6 +99,7 @@ const DEFAULTED_OPTIONAL_INIT_PARAM_ENTRIES: readonly [string, readonly string[]
   ["CronRunLogEntry", ["errorReason", "failureNotificationDelivery"]],
   ["ExecApprovalRequestParams", ["requireDeliveryRoute", "suppressDelivery"]],
   ["PluginApprovalRequestParams", ["approvalReviewerDeviceIds"]],
+  ["SkillsSecurityVerdictsParams", ["items"]],
   ["DevicePairSetupCodeResult", ["gatewayUrls"]],
   ["AgentSummary", ["thinkingLevels", "thinkingOptions", "thinkingDefault"]],
   ["ModelChoice", ["available"]],
