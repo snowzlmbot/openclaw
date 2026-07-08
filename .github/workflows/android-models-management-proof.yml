@@ -189,6 +189,7 @@ jobs:
 
           function capture() {
             local name="$1"
+            echo "[proof] capture $name" | tee -a "$OUT/capture.log"
             sleep 1
             adb shell screencap -p "/sdcard/${name}.png"
             adb pull "/sdcard/${name}.png" "$OUT/${name}.png" >/dev/null
@@ -255,11 +256,13 @@ jobs:
           adb push "$OUT/openclaw.node.xml" /data/local/tmp/openclaw.node.xml >/dev/null
           adb shell run-as "$PKG" sh -c 'mkdir -p shared_prefs && cp /data/local/tmp/openclaw.node.xml shared_prefs/openclaw.node.xml'
 
+          echo "[proof] launch app" | tee -a "$OUT/capture.log"
           adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null
           sleep 8
           tap_text "Don't allow" || tap_text "Don’t allow" || tap_text "OK" || true
 
-          adb shell screenrecord --time-limit 120 /sdcard/openclaw-models-proof.mp4 >/dev/null 2>&1 &
+          echo "[proof] start screenrecord" | tee -a "$OUT/capture.log"
+          adb shell screenrecord --time-limit 45 /sdcard/openclaw-models-proof.mp4 >/dev/null 2>&1 &
           REC_PID=$!
 
           capture 00-launched-connected
@@ -298,6 +301,7 @@ jobs:
           sleep 1
           capture 08-final-state
 
+          echo "[proof] finish screenrecord" | tee -a "$OUT/capture.log"
           wait "$REC_PID" || true
           adb pull /sdcard/openclaw-models-proof.mp4 "$OUT/openclaw-models-proof.mp4" >/dev/null || true
           adb logcat -d > "$OUT/logcat.txt" || true
@@ -348,7 +352,7 @@ jobs:
             adb shell settings put global animator_duration_scale 0
           }
           wait_for_boot
-          /tmp/openclaw-models-capture.sh
+          timeout 420 /tmp/openclaw-models-capture.sh
 
       - name: Summarize proof artifact
         if: always()
