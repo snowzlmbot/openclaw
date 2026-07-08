@@ -343,10 +343,22 @@ jobs:
               time.sleep(0.25)
           raise SystemExit('proof gateway did not open port 18789')
           PY
-          emulator -avd "${AVD_NAME}" -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -camera-back none -camera-front none > proof-output/emulator.log 2>&1 &
+          echo "[proof] start emulator" | tee -a proof-output/capture.log
+          emulator -avd "${AVD_NAME}" -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -camera-back none -camera-front none > proof-output/emulator.log 2>&1 &
+          EMU_PID=$!
+          trap 'kill $GW_PID $EMU_PID 2>/dev/null || true' EXIT
           wait_for_boot() {
-            adb wait-for-device
-            until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 2; done
+            timeout 180 adb wait-for-device
+            local deadline=$((SECONDS + 180))
+            until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do
+              if [ "$SECONDS" -gt "$deadline" ]; then
+                echo "[proof] emulator boot timeout" | tee -a proof-output/capture.log
+                adb devices -l | tee -a proof-output/capture.log || true
+                tail -n 200 proof-output/emulator.log || true
+                return 1
+              fi
+              sleep 2
+            done
             adb shell settings put global window_animation_scale 0
             adb shell settings put global transition_animation_scale 0
             adb shell settings put global animator_duration_scale 0
