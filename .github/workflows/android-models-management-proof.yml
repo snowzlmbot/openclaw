@@ -324,6 +324,7 @@ jobs:
           PROOF_GATEWAY_LOG: proof-output/proof-gateway.jsonl
         run: |
           set -euo pipefail
+          export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
           mkdir -p proof-output
           python3 /tmp/openclaw-models-proof-gateway.py > proof-output/proof-gateway.stdout 2>&1 &
           GW_PID=$!
