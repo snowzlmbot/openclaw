@@ -255,7 +255,8 @@ jobs:
           </map>
           XML
           adb push "$OUT/openclaw.node.xml" /data/local/tmp/openclaw.node.xml >/dev/null
-          adb shell run-as "$PKG" sh -c 'mkdir -p shared_prefs && cp /data/local/tmp/openclaw.node.xml shared_prefs/openclaw.node.xml'
+          adb shell run-as "$PKG" mkdir -p shared_prefs
+          adb shell run-as "$PKG" cp /data/local/tmp/openclaw.node.xml shared_prefs/openclaw.node.xml
 
           echo "[proof] launch app" | tee -a "$OUT/capture.log"
           adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null
