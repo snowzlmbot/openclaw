@@ -95,6 +95,53 @@ wait_for_gateway() {
 
 start_real_gateway_and_seed_proposal() {
   write_gateway_config
+
+  mkdir -p proof-output/proposal-draft/references
+  cat > proof-output/proposal-draft/PROPOSAL.md <<'MD'
+# Proof Mobile Skill
+
+Android real Gateway media proof for PR 101911.
+
+This pending proposal is created by `openclaw skills workshop propose-create` inside the same temporary proof state. The Android Settings > Skill Workshop screen then loads it through the live Gateway `skills.proposals.list` and `skills.proposals.inspect` read paths.
+MD
+  cat > proof-output/proposal-draft/references/android-proof.md <<'MD'
+This support file is created by the real proof workflow and inspected from the Android UI.
+MD
+
+  run_openclaw skills workshop propose-create \
+    --name "Proof Mobile Skill" \
+    --description "Android real Gateway media proof for PR 101911" \
+    --proposal-dir proof-output/proposal-draft \
+    --goal "Prove the Android Settings Skill Workshop list and inspect flow against a live Gateway." \
+    --evidence "Created inside snowzlmbot/openclaw GitHub Actions before Android emulator capture." \
+    --json > proof-output/cli-proposal-create.json
+
+  python3 - <<'PY'
+import json
+from pathlib import Path
+obj = json.loads(Path('proof-output/cli-proposal-create.json').read_text())
+ids = []
+
+def walk(value):
+    if isinstance(value, dict):
+        rec = value.get('record')
+        if isinstance(rec, dict) and isinstance(rec.get('id'), str):
+            ids.append(rec['id'])
+        if isinstance(value.get('id'), str) and value.get('status'):
+            ids.append(value['id'])
+        for item in value.values():
+            walk(item)
+    elif isinstance(value, list):
+        for item in value:
+            walk(item)
+walk(obj)
+if not ids:
+    raise SystemExit('Could not parse created proposal id from cli-proposal-create.json')
+Path('proof-output/proposal-id.txt').write_text(ids[0] + '\n')
+PY
+  local proposal_id
+  proposal_id="$(tr -d '[:space:]' < proof-output/proposal-id.txt)"
+
   run_openclaw gateway run \
     --port "${GATEWAY_PORT}" \
     --bind loopback \
@@ -106,51 +153,6 @@ start_real_gateway_and_seed_proposal() {
     > proof-output/gateway.log 2>&1 &
   GATEWAY_PID="$!"
   wait_for_gateway
-
-  cat > proof-output/gateway-proposal-create-params.json <<'JSON'
-{
-  "name": "proof-mobile-skill",
-  "description": "Android real Gateway media proof for PR 101911",
-  "goal": "Prove the Android Settings Skill Workshop list and inspect flow against a live Gateway.",
-  "evidence": "Created inside snowzlmbot/openclaw GitHub Actions before Android emulator capture.",
-  "content": "# Proof Mobile Skill\n\nAndroid real Gateway media proof for PR 101911.\n\nThis pending proposal is created by the temporary OpenClaw Gateway through skills.proposals.create, then loaded by the Android Settings > Skill Workshop screen through skills.proposals.list and skills.proposals.inspect.\n",
-  "supportFiles": [
-    {
-      "path": "references/android-proof.md",
-      "content": "This support file is created by the real Gateway proof workflow and inspected from the Android UI.\n"
-    }
-  ]
-}
-JSON
-
-  run_openclaw_gateway_call skills.proposals.create \
-    --params "$(cat proof-output/gateway-proposal-create-params.json)" \
-    --timeout 20000 \
-    --json > proof-output/gateway-proposal-create.json
-
-  python3 - <<'PY'
-import json
-from pathlib import Path
-obj = json.loads(Path('proof-output/gateway-proposal-create.json').read_text())
-ids = []
-
-def walk(value):
-    if isinstance(value, dict):
-        rec = value.get('record')
-        if isinstance(rec, dict) and isinstance(rec.get('id'), str):
-            ids.append(rec['id'])
-        for item in value.values():
-            walk(item)
-    elif isinstance(value, list):
-        for item in value:
-            walk(item)
-walk(obj)
-if not ids:
-    raise SystemExit('Could not parse created proposal id from gateway-proposal-create.json')
-Path('proof-output/proposal-id.txt').write_text(ids[0] + '\n')
-PY
-  local proposal_id
-  proposal_id="$(tr -d '[:space:]' < proof-output/proposal-id.txt)"
 
   run_openclaw_gateway_call skills.proposals.list \
     --params '{}' \
@@ -166,6 +168,7 @@ PY
 from pathlib import Path
 needles = ['Proof Mobile Skill', 'references/android-proof.md']
 combined = '\n'.join(Path(p).read_text(encoding='utf-8', errors='ignore') for p in [
+    'proof-output/cli-proposal-create.json',
     'proof-output/gateway-proposals-list.json',
     'proof-output/gateway-proposal-inspect.json',
 ])
@@ -174,7 +177,6 @@ if missing:
     raise SystemExit(f'Missing expected Gateway proposal proof output: {missing}')
 PY
 }
-
 wait_for_text() {
   local needle="$1"
   local attempts="${2:-45}"
@@ -367,10 +369,11 @@ fi
   echo "route=launcher -> completed-onboarding app shell -> Settings tab -> Skill Workshop row -> real Gateway proposal list -> inspect detail -> admin action controls"
   echo "preseeded_state=onboarding.completed=true and manual loopback gateway endpoint only"
   echo "gateway_auth=auth none on loopback-only temporary proof Gateway"
-  echo "gateway_rpc=health, skills.proposals.create, skills.proposals.list, skills.proposals.inspect"
+  echo "gateway_rpc=health, skills.proposals.list, skills.proposals.inspect"
+  echo "proposal_create=cli skills workshop propose-create against the same temporary proof state"
   echo "screenshot_mode=false"
   echo "media=03-real-gateway-proposal-list.png, 04-real-gateway-proposal-detail.png, 05-skill-workshop-admin-actions.png"
-  echo "logs=gateway.log, gateway-proposal-create.json, gateway-proposals-list.json, gateway-proposal-inspect.json"
+  echo "logs=gateway.log, cli-proposal-create.json, gateway-proposals-list.json, gateway-proposal-inspect.json"
   echo "adb_devices:"; adb devices
   echo "captures:"; find proof-output -maxdepth 1 -type f -printf '%f\n' | sort
 } > proof-output/proof-manifest.txt

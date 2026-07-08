@@ -188,7 +188,7 @@ jobs:
             fi
             echo "- Capture source: GitHub-hosted ubuntu-24.04 runner + Android emulator API 35"
             echo "- App artifact: \`$(cat proof-output/apk-path.txt)\`"
-            echo "- Gateway proof: temporary OpenClaw Gateway started from this checkout; proposal created through \`gateway call skills.proposals.create\`; Android loads it through Settings → Skill Workshop."
+            echo "- Gateway proof: temporary OpenClaw Gateway started from this checkout; pending proposal created with \`openclaw skills workshop propose-create\`; Android loads it through Settings → Skill Workshop via Gateway \`skills.proposals.list/inspect\`."
             echo "- Screenshot mode: false"
             echo
             echo "### Captured media and logs"
