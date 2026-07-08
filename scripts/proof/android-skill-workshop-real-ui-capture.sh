@@ -303,6 +303,10 @@ adb shell run-as "$APP_ID" cp /data/local/tmp/openclaw.node.xml shared_prefs/ope
 adb shell am force-stop "$APP_ID" || true
 timeout 30 adb shell monkey -p "$APP_ID" -c android.intent.category.LAUNCHER 1 > proof-output/monkey-launch.log || true
 wait_for_text "$SETTINGS_TEXT" 90
+if wait_for_text "Reconnect gateway" 8; then
+  tap_text "Reconnect gateway" "570 1070" || true
+  sleep 8
+fi
 capture_png /sdcard/openclaw-01-launch.png proof-output/01-real-launch-connected-gateway.png
 copy_ui_xml proof-output/01-launch-ui.xml
 
