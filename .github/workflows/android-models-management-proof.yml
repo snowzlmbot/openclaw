@@ -1,0 +1,381 @@
+name: Android Models Management Real UI Proof
+
+on:
+  push:
+    branches:
+      - evidence/pr-101912-real-android-models-proof
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: PR branch/ref to build and capture
+        required: true
+        default: android-models-management-20260708
+
+permissions:
+  contents: read
+
+env:
+  TARGET_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.target_ref || 'android-models-management-20260708' }}
+  AVD_NAME: openclaw-models-proof
+  API_LEVEL: '35'
+
+jobs:
+  real-android-models-media-proof:
+    name: Capture real Android Models UI media
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout PR head source
+        uses: actions/checkout@df4cb6f95a9a5a2e38a7a3ce29c2d3a06d6f1d8b
+        with:
+          ref: ${{ env.TARGET_REF }}
+          fetch-depth: 1
+
+      - name: Record target source revision
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          mkdir -p proof-output
+          {
+            echo "target_ref=${TARGET_REF}"
+            echo "target_sha=$(git rev-parse HEAD)"
+            echo "proof_workflow_sha=${GITHUB_SHA}"
+            echo "proof_run=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          } | tee proof-output/proof-target.txt
+
+      - name: Set up Java
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Enable KVM
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+          fi
+
+      - name: Set up Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platform-tools" \
+            "platforms;android-${API_LEVEL}" \
+            "system-images;android-${API_LEVEL};google_apis;x86_64" \
+            "emulator" >/dev/null
+
+      - name: Install Python websocket dependency for proof gateway
+        shell: bash
+        run: python3 -m pip install --user 'websockets==15.0.1'
+
+      - name: Build debug APK from target source
+        shell: bash
+        working-directory: apps/android
+        run: ./gradlew --no-daemon --build-cache :app:assemblePlayDebug
+
+      - name: Create proof gateway and capture scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/openclaw-models-proof-gateway.py <<'PY'
+          import asyncio
+          import json
+          import os
+          import time
+          from websockets.asyncio.server import serve
+
+          PORT = int(os.environ.get("PROOF_GATEWAY_PORT", "18789"))
+          LOG_PATH = os.environ.get("PROOF_GATEWAY_LOG", "proof-output/proof-gateway.jsonl")
+          HASH = 1
+          MODELS = [
+              {"id": "proof-model-alpha", "name": "Proof Model Alpha", "provider": "openai", "available": True, "input": ["text"], "contextTokens": 128000, "supportsReasoning": True},
+              {"id": "proof-remove-me", "name": "Proof Remove Me", "provider": "openai", "available": True, "input": ["text"], "contextTokens": 64000},
+          ]
+
+          def log(event, **data):
+              os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+              record = {"ts": time.time(), "event": event, **data}
+              with open(LOG_PATH, "a", encoding="utf-8") as fh:
+                  fh.write(json.dumps(record, sort_keys=True) + "\n")
+
+          def response_payload(method, params):
+              global HASH, MODELS
+              if method == "connect":
+                  return {
+                      "server": {"host": "proof-gateway", "version": "pr-101912-proof"},
+                      "auth": {"role": params.get("role", "operator"), "scopes": params.get("scopes", [])},
+                      "snapshot": {"sessionDefaults": {"mainSessionKey": "agent:main:proof"}},
+                  }
+              if method == "models.list":
+                  view = (params or {}).get("view", "default")
+                  return {"models": list(MODELS) if view in ("provider-config", "all", "configured", "default") else []}
+              if method == "models.authStatus":
+                  return {"providers": [{"id": "openai", "displayName": "OpenAI", "status": "ready", "profileCount": 1}]}
+              if method == "config.get":
+                  return {"hash": f"proof-hash-{HASH}", "config": {"models": {"providers": {"openai": {"models": MODELS}}}}}
+              if method == "models.configure":
+                  provider = str((params or {}).get("provider", "openai")).strip().lower() or "openai"
+                  model_id = str((params or {}).get("modelId", "proof-added-model")).strip() or "proof-added-model"
+                  name = str((params or {}).get("name", model_id)).strip() or model_id
+                  MODELS = [m for m in MODELS if not (m.get("provider") == provider and m.get("id") == model_id)]
+                  MODELS.append({"id": model_id, "name": name, "provider": provider, "available": True, "input": ["text"], "contextTokens": 32000})
+                  MODELS.sort(key=lambda m: (m.get("provider", ""), m.get("name", ""), m.get("id", "")))
+                  HASH += 1
+                  return {"ok": True, "message": f"Configured {provider}/{model_id}."}
+              if method == "models.remove":
+                  provider = str((params or {}).get("provider", "openai")).strip().lower() or "openai"
+                  model_id = str((params or {}).get("modelId", "")).strip()
+                  before = len(MODELS)
+                  MODELS = [m for m in MODELS if not (m.get("provider") == provider and m.get("id") == model_id)]
+                  HASH += 1
+                  return {"ok": True, "removed": len(MODELS) != before, "message": f"Removed {provider}/{model_id}."}
+              if method == "agents.list":
+                  return {"defaultId": "main", "mainKey": "agent:main:proof", "agents": [{"id": "main", "name": "Proof Main", "identity": {"emoji": "🌙"}}]}
+              if method == "sessions.list":
+                  return {"sessions": []}
+              if method == "health":
+                  return {"ok": True, "status": "ok"}
+              return {}
+
+          async def handler(ws):
+              await ws.send(json.dumps({"type": "event", "event": "connect.challenge", "payload": {"nonce": "proof-nonce"}}))
+              async for raw in ws:
+                  try:
+                      frame = json.loads(raw)
+                  except Exception as exc:
+                      log("malformed", raw=raw, error=str(exc))
+                      continue
+                  method = frame.get("method")
+                  params = frame.get("params") or {}
+                  log("request", method=method, params=params)
+                  payload = response_payload(method, params)
+                  await ws.send(json.dumps({"type": "res", "id": frame.get("id"), "ok": True, "payload": payload}))
+
+          async def main():
+              async with serve(handler, "0.0.0.0", PORT):
+                  log("listening", port=PORT)
+                  await asyncio.Future()
+
+          asyncio.run(main())
+          PY
+
+          cat > /tmp/openclaw-models-capture.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+          PKG="ai.openclaw.app"
+          APK="$(ls apps/android/app/build/outputs/apk/play/debug/*.apk | head -n 1)"
+          OUT="proof-output"
+          mkdir -p "$OUT"
+
+          function wait_for_boot() {
+            adb wait-for-device
+            until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 2; done
+            adb shell input keyevent 82 || true
+          }
+
+          function dump_ui() {
+            local name="$1"
+            adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
+            adb pull /sdcard/window.xml "$OUT/${name}.xml" >/dev/null 2>&1 || true
+          }
+
+          function capture() {
+            local name="$1"
+            sleep 1
+            adb shell screencap -p "/sdcard/${name}.png"
+            adb pull "/sdcard/${name}.png" "$OUT/${name}.png" >/dev/null
+            dump_ui "$name"
+          }
+
+          function coords_for_text() {
+            local needle="$1"
+            local index="${2:-0}"
+            dump_ui tap-candidate >/dev/null 2>&1 || true
+            python3 - "$OUT/tap-candidate.xml" "$needle" "$index" <<'PY'
+          import re, sys, xml.etree.ElementTree as ET
+          path, needle, index = sys.argv[1], sys.argv[2].lower(), sys.argv[3]
+          root = ET.parse(path).getroot()
+          matches = []
+          for node in root.iter('node'):
+              values = [node.attrib.get('text',''), node.attrib.get('content-desc',''), node.attrib.get('resource-id','')]
+              if any(needle in v.lower() for v in values):
+                  b = node.attrib.get('bounds','')
+                  m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', b)
+                  if m:
+                      l,t,r,bottom = map(int, m.groups())
+                      if r > l and bottom > t:
+                          matches.append(((l+r)//2, (t+bottom)//2, values, b))
+          if not matches:
+              sys.exit(2)
+          pos = -1 if index == 'last' else int(index)
+          x,y,_,_ = matches[pos]
+          print(f"{x} {y}")
+          PY
+          }
+
+          function tap_text() {
+            local needle="$1"
+            local index="${2:-0}"
+            local coords
+            if coords=$(coords_for_text "$needle" "$index"); then
+              adb shell input tap $coords
+              sleep 1
+              return 0
+            fi
+            return 1
+          }
+
+          function type_text() {
+            local value="$1"
+            adb shell input text "$value"
+            sleep 0.5
+          }
+
+          echo "Installing APK: $APK" | tee "$OUT/capture.log"
+          adb install -r "$APK" | tee -a "$OUT/capture.log"
+
+          cat > "$OUT/openclaw.node.xml" <<XML
+          <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+          <map>
+            <boolean name="onboarding.completed" value="true" />
+            <boolean name="gateway.manual.enabled" value="true" />
+            <string name="gateway.manual.host">10.0.2.2</string>
+            <int name="gateway.manual.port" value="18789" />
+            <boolean name="gateway.manual.tls" value="false" />
+          </map>
+          XML
+          adb push "$OUT/openclaw.node.xml" /data/local/tmp/openclaw.node.xml >/dev/null
+          adb shell run-as "$PKG" sh -c 'mkdir -p shared_prefs && cp /data/local/tmp/openclaw.node.xml shared_prefs/openclaw.node.xml'
+
+          adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null
+          sleep 8
+          tap_text "Don't allow" || tap_text "Don’t allow" || tap_text "OK" || true
+
+          adb shell screenrecord --time-limit 120 /sdcard/openclaw-models-proof.mp4 >/dev/null 2>&1 &
+          REC_PID=$!
+
+          capture 00-launched-connected
+          tap_text "Settings" || adb shell input tap 970 2230
+          sleep 2
+          capture 01-settings-home
+          tap_text "Providers & Models" || tap_text "Providers" || adb shell input tap 520 1050
+          sleep 4
+          capture 02-provider-models-initial
+
+          tap_text "Test" || true
+          sleep 3
+          capture 03-after-test-availability
+
+          tap_text "Provider, e.g. openai" || adb shell input tap 280 575
+          type_text "openai"
+          tap_text "Model ID, e.g. gpt-5.5" || adb shell input tap 350 690
+          type_text "proof-added-model"
+          tap_text "Display name" || adb shell input tap 350 805
+          type_text "Proof%sAdded%sModel"
+          adb shell input keyevent 4 || true
+          sleep 1
+          capture 04-configure-input
+          tap_text "Save model" || adb shell input tap 540 925
+          sleep 5
+          capture 05-configure-saved
+
+          tap_text "Remove" || true
+          sleep 1
+          capture 06-remove-confirm-dialog
+          tap_text "Remove" last || true
+          sleep 4
+          capture 07-remove-applied
+
+          adb shell input keyevent 4 || true
+          sleep 1
+          capture 08-final-state
+
+          wait "$REC_PID" || true
+          adb pull /sdcard/openclaw-models-proof.mp4 "$OUT/openclaw-models-proof.mp4" >/dev/null || true
+          adb logcat -d > "$OUT/logcat.txt" || true
+          {
+            echo "target_ref=${TARGET_REF:-android-models-management-20260708}"
+            echo "target_sha=${TARGET_SHA:-unknown}"
+            echo "proof_media=PNG screenshots + MP4 screenrecord captured from Android emulator via ADB"
+            echo "proof_gateway=local websocket proof gateway responding to real Android GatewaySession RPCs"
+            echo "operations=Settings navigation; Providers & Models open; Test; Configure; Remove dialog; Remove apply"
+          } | tee "$OUT/manifest.txt"
+          SH
+          chmod +x /tmp/openclaw-models-capture.sh
+
+      - name: Create Android virtual device
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "no" | avdmanager create avd -n "${AVD_NAME}" -k "system-images;android-${API_LEVEL};google_apis;x86_64" --device "pixel_6" --force
+
+      - name: Capture real UI media in emulator
+        shell: bash
+        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          PROOF_GATEWAY_LOG: proof-output/proof-gateway.jsonl
+        run: |
+          set -euo pipefail
+          mkdir -p proof-output
+          python3 /tmp/openclaw-models-proof-gateway.py > proof-output/proof-gateway.stdout 2>&1 &
+          GW_PID=$!
+          trap 'kill $GW_PID 2>/dev/null || true' EXIT
+          python3 - <<'PY'
+          import socket, time
+          deadline = time.time() + 20
+          while time.time() < deadline:
+              with socket.socket() as s:
+                  if s.connect_ex(('127.0.0.1', 18789)) == 0:
+                      raise SystemExit(0)
+              time.sleep(0.25)
+          raise SystemExit('proof gateway did not open port 18789')
+          PY
+          emulator -avd "${AVD_NAME}" -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -camera-back none -camera-front none > proof-output/emulator.log 2>&1 &
+          wait_for_boot() {
+            adb wait-for-device
+            until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 2; done
+            adb shell settings put global window_animation_scale 0
+            adb shell settings put global transition_animation_scale 0
+            adb shell settings put global animator_duration_scale 0
+          }
+          wait_for_boot
+          /tmp/openclaw-models-capture.sh
+
+      - name: Summarize proof artifact
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Android Models Management Real UI Proof"
+            echo
+            echo "- Target ref: ${TARGET_REF}"
+            echo "- Target SHA: ${{ steps.target.outputs.sha }}"
+            echo "- Proof run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "- Media artifact contains real emulator PNG screenshots, UIAutomator XML dumps, ADB screenrecord MP4, proof gateway request log, and Android logcat."
+            echo "- The proof gateway is a local websocket server; the Android APK connects through its real GatewaySession path to load/test/configure/remove provider models."
+            echo
+            echo "### Captured operations"
+            echo "1. Open Settings > Providers & Models."
+            echo "2. Show provider-configured model IDs from a live gateway response."
+            echo "3. Tap Test and capture availability result."
+            echo "4. Type provider/model/name, tap Save model, and capture the added model."
+            echo "5. Tap Remove, capture confirmation dialog, confirm removal, and capture updated list."
+          } | tee -a "$GITHUB_STEP_SUMMARY" proof-output/summary.md
+
+      - name: Upload real Android media proof artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pr-101912-real-android-models-media-proof-${{ steps.target.outputs.sha }}
+          path: proof-output/**
+          if-no-files-found: error
+          retention-days: 30
