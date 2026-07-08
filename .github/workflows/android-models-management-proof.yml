@@ -18,6 +18,7 @@ env:
   TARGET_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.target_ref || 'android-models-management-20260708' }}
   AVD_NAME: openclaw-models-proof
   API_LEVEL: '35'
+  ANDROID_AVD_HOME: ${{ github.workspace }}/.android/avd
 
 jobs:
   real-android-models-media-proof:
@@ -319,6 +320,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p "${ANDROID_AVD_HOME}"
           echo "no" | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n "${AVD_NAME}" -k "system-images;android-${API_LEVEL};google_apis;x86_64" --device "pixel_6" --force
 
       - name: Capture real UI media in emulator
