@@ -98,6 +98,7 @@ private fun ScreenshotSceneBody(
       AndroidScreenshotScene.Voice -> VoiceScene()
       AndroidScreenshotScene.Screen -> ScreenScene()
       AndroidScreenshotScene.Settings -> SettingsScene()
+      AndroidScreenshotScene.SkillWorkshop -> SkillWorkshopScene()
     }
   }
 }
@@ -190,6 +191,19 @@ private fun SettingsScene() {
   CompactList(
     title = "Notifications",
     rows = listOf("Gateway status", "Approval requests", "Background presence"),
+  )
+}
+
+@Composable
+private fun SkillWorkshopScene() {
+  FeaturePanel(icon = Icons.Default.Settings, title = "Skill Workshop", subtitle = "Review queue from Settings") {
+    MetricRow(label = "Pending", value = "2 proposals")
+    MetricRow(label = "Scope", value = "operator.admin required")
+    MetricRow(label = "Actions", value = "Apply · Reject · Quarantine")
+  }
+  CompactList(
+    title = "Proposal details",
+    rows = listOf("Inspect markdown", "Filter by status", "Search by skill key"),
   )
 }
 
@@ -399,4 +413,5 @@ private fun sceneTitle(scene: AndroidScreenshotScene): String =
     AndroidScreenshotScene.Voice -> "Talk"
     AndroidScreenshotScene.Screen -> "Device tools"
     AndroidScreenshotScene.Settings -> "Settings"
+    AndroidScreenshotScene.SkillWorkshop -> "Skill Workshop"
   }

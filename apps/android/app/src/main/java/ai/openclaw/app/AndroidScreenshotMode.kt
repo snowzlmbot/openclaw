@@ -13,6 +13,7 @@ enum class AndroidScreenshotScene(
   Voice("voice"),
   Screen("screen"),
   Settings("settings"),
+  SkillWorkshop("skill-workshop"),
   ;
 
   companion object {

@@ -46,6 +46,14 @@ while [[ $# -gt 0 ]]; do
       LOCALE="${2:-}"
       shift 2
       ;;
+    --scene)
+      SCENES=("${2:-}")
+      shift 2
+      ;;
+    --app-language)
+      # Accepted for proof workflow compatibility; screenshot mode renders static scenes.
+      shift 2
+      ;;
     --skip-build)
       SKIP_BUILD=1
       shift

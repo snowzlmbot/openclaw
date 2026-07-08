@@ -1,0 +1,151 @@
+name: Android Skill Workshop proof
+
+on:
+  push:
+    branches:
+      - evidence/pr-101911-real-android-proof
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Branch, tag, or SHA to test
+        required: true
+        default: evidence/pr-101911-real-android-proof
+
+concurrency:
+  group: android-skill-workshop-proof-${{ github.run_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  android-skill-workshop-proof:
+    name: Android Skill Workshop proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      ANDROID_AVD_HOME: ${{ github.workspace }}/.android/avd
+    steps:
+      - name: Checkout target
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.target_ref || github.ref }}
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          submodules: false
+
+      - name: Setup Java
+        uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+          cache-dependency-path: |
+            apps/android/**/*.gradle*
+            apps/android/**/gradle-wrapper.properties
+            apps/android/gradle/libs.versions.toml
+
+      - name: Cache Android SDK
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
+        with:
+          path: ~/.android-sdk
+          key: ${{ runner.os }}-android-skill-workshop-proof-sdk-v1-api35-buildtools-36.0.0
+          restore-keys: |
+            ${{ runner.os }}-android-skill-workshop-proof-sdk-v1-
+
+      - name: Setup Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ANDROID_SDK_ROOT="$HOME/.android-sdk"
+          CMDLINE_TOOLS_VERSION="14742923"
+          ARCHIVE="commandlinetools-linux-${CMDLINE_TOOLS_VERSION}_latest.zip"
+          URL="https://dl.google.com/android/repository/${ARCHIVE}"
+          if [ ! -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+            curl -fsSL "$URL" -o "/tmp/${ARCHIVE}"
+            rm -rf "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+            unzip -q "/tmp/${ARCHIVE}" -d "$ANDROID_SDK_ROOT/cmdline-tools"
+            mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          fi
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo "$ANDROID_SDK_ROOT/emulator" >> "$GITHUB_PATH"
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" --licenses >/dev/null || true
+          sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" --install \
+            "platform-tools" \
+            "emulator" \
+            "platforms;android-37.0" \
+            "build-tools;36.0.0" \
+            "system-images;android-35;google_apis;x86_64"
+
+      - name: Create proof AVD
+        shell: bash
+        env:
+          AVD_NAME: OpenClaw_Skill_Workshop_API35
+        run: |
+          set -euo pipefail
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo "no" | avdmanager create avd \
+            --force \
+            --name "$AVD_NAME" \
+            --package "system-images;android-35;google_apis;x86_64" \
+            --device "pixel_6"
+
+      - name: Enable KVM access
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -e /dev/kvm ]; then
+            sudo sh -c 'echo KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm" > /etc/udev/rules.d/99-kvm4all.rules'
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+            ls -l /dev/kvm
+          fi
+
+      - name: Build debug APK
+        working-directory: apps/android
+        shell: bash
+        run: ./gradlew --no-daemon :app:assemblePlayDebug
+
+      - name: Capture real emulator media
+        shell: bash
+        env:
+          AVD_NAME: OpenClaw_Skill_Workshop_API35
+        run: bash scripts/proof/android-skill-workshop-capture.sh
+
+      - name: Summarize proof
+        shell: bash
+        env:
+          TARGET_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.target_ref || github.ref }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Android Skill Workshop real media proof"
+            echo
+            echo "- Target ref: \`${TARGET_REF}\`"
+            echo "- Commit: \`$(git rev-parse HEAD)\`"
+            echo "- Capture source: GitHub-hosted ubuntu-24.04 runner + Android emulator API 35"
+            echo "- App artifact: \`apps/android/app/build/outputs/apk/play/debug/app-play-debug.apk\`"
+            echo
+            echo "### Captured media"
+            find proof-output -maxdepth 1 -type f -printf '- `%f`\n' | sort
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload proof artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: android-skill-workshop-real-proof
+          path: |
+            proof-output/*
+            apps/android/app/build/outputs/apk/play/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
