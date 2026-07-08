@@ -176,19 +176,13 @@ jobs:
           OUT="proof-output"
           mkdir -p "$OUT"
 
-          function wait_for_boot() {
-            adb wait-for-device
-            until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 2; done
-            adb shell input keyevent 82 || true
-          }
-
-          function dump_ui() {
+          dump_ui() {
             local name="$1"
             adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
             adb pull /sdcard/window.xml "$OUT/${name}.xml" >/dev/null 2>&1 || true
           }
 
-          function capture() {
+          capture() {
             local name="$1"
             echo "[proof] capture $name" | tee -a "$OUT/capture.log"
             sleep 1
@@ -197,7 +191,7 @@ jobs:
             dump_ui "$name"
           }
 
-          function coords_for_text() {
+          coords_for_text() {
             local needle="$1"
             local index="${2:-0}"
             dump_ui tap-candidate >/dev/null 2>&1 || true
@@ -223,19 +217,71 @@ jobs:
           PY
           }
 
-          function tap_text() {
+          coords_for_exact_text() {
+            local needle="$1"
+            local index="${2:-0}"
+            dump_ui tap-candidate >/dev/null 2>&1 || true
+            python3 - "$OUT/tap-candidate.xml" "$needle" "$index" <<'PY'
+          import re, sys, xml.etree.ElementTree as ET
+          path, needle, index = sys.argv[1], sys.argv[2], sys.argv[3]
+          root = ET.parse(path).getroot()
+          matches = []
+          for node in root.iter('node'):
+              values = [node.attrib.get('text',''), node.attrib.get('content-desc','')]
+              if any(needle == v for v in values):
+                  b = node.attrib.get('bounds','')
+                  m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', b)
+                  if m:
+                      l,t,r,bottom = map(int, m.groups())
+                      if r > l and bottom > t:
+                          matches.append(((l+r)//2, (t+bottom)//2, values, b))
+          if not matches:
+              sys.exit(2)
+          pos = -1 if index == 'last' else int(index)
+          x,y,_,_ = matches[pos]
+          print(f"{x} {y}")
+          PY
+          }
+
+          tap_text() {
             local needle="$1"
             local index="${2:-0}"
             local coords
             if coords=$(coords_for_text "$needle" "$index"); then
+              echo "[proof] tap text: $needle -> $coords" | tee -a "$OUT/capture.log"
               adb shell input tap $coords
               sleep 1
               return 0
             fi
+            echo "[proof] text not found: $needle" | tee -a "$OUT/capture.log"
             return 1
           }
 
-          function type_text() {
+          tap_exact_text() {
+            local needle="$1"
+            local index="${2:-0}"
+            local coords
+            if coords=$(coords_for_exact_text "$needle" "$index"); then
+              echo "[proof] tap exact text: $needle -> $coords" | tee -a "$OUT/capture.log"
+              adb shell input tap $coords
+              sleep 1
+              return 0
+            fi
+            echo "[proof] exact text not found: $needle" | tee -a "$OUT/capture.log"
+            return 1
+          }
+
+          assert_ui_contains() {
+            local name="$1"
+            local needle="$2"
+            dump_ui "$name" >/dev/null 2>&1 || true
+            if ! grep -qi "$needle" "$OUT/${name}.xml"; then
+              echo "[proof] expected UI text missing: $needle in $name" | tee -a "$OUT/capture.log"
+              return 1
+            fi
+          }
+
+          type_text() {
             local value="$1"
             adb shell input text "$value"
             sleep 0.5
@@ -268,16 +314,25 @@ jobs:
           REC_PID=$!
 
           capture 00-launched-connected
-          tap_text "Settings" || adb shell input tap 970 2230
+          echo "[proof] open bottom Settings tab" | tee -a "$OUT/capture.log"
+          adb shell input tap 935 2250
           sleep 2
           capture 01-settings-home
-          tap_text "Providers & Models" || tap_text "Providers" || adb shell input tap 520 1050
+          assert_ui_contains 01-settings-home "Providers &amp; Models" || assert_ui_contains 01-settings-home "Providers & Models"
+          tap_exact_text "Providers & Models" || {
+            adb shell input swipe 540 1900 540 700 350
+            sleep 1
+            tap_exact_text "Providers & Models"
+          }
           sleep 4
           capture 02-provider-models-initial
+          assert_ui_contains 02-provider-models-initial "Providers &amp; Models" || assert_ui_contains 02-provider-models-initial "Providers & Models"
+          assert_ui_contains 02-provider-models-initial "proof-model-alpha"
 
-          tap_text "Test" || true
+          tap_exact_text "Test" || tap_text "Test"
           sleep 3
           capture 03-after-test-availability
+          assert_ui_contains 03-after-test-availability "Available"
 
           tap_text "Provider, e.g. openai" || adb shell input tap 280 575
           type_text "openai"
@@ -288,14 +343,16 @@ jobs:
           adb shell input keyevent 4 || true
           sleep 1
           capture 04-configure-input
-          tap_text "Save model" || adb shell input tap 540 925
+          tap_exact_text "Save model" || tap_text "Save model"
           sleep 5
           capture 05-configure-saved
+          assert_ui_contains 05-configure-saved "proof-added-model"
 
-          tap_text "Remove" || true
+          tap_exact_text "Remove" || tap_text "Remove"
           sleep 1
           capture 06-remove-confirm-dialog
-          tap_text "Remove" last || true
+          assert_ui_contains 06-remove-confirm-dialog "Remove model"
+          tap_exact_text "Remove" last || tap_text "Remove" last
           sleep 4
           capture 07-remove-applied
 
@@ -368,6 +425,9 @@ jobs:
           }
           wait_for_boot
           timeout 420 /tmp/openclaw-models-capture.sh
+          grep -q '"method": "models.configure"' proof-output/proof-gateway.jsonl
+          grep -q '"method": "models.remove"' proof-output/proof-gateway.jsonl
+          grep -q '"view": "provider-config"' proof-output/proof-gateway.jsonl
 
       - name: Summarize proof artifact
         if: always()
