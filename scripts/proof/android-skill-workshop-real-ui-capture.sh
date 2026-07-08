@@ -74,9 +74,13 @@ write_gateway_config() {
 JSON
 }
 
+run_openclaw_gateway_call() {
+  run_openclaw gateway call "$@"
+}
+
 wait_for_gateway() {
   for attempt in $(seq 1 90); do
-    if run_openclaw gateway call health --url "${GATEWAY_URL}" --timeout 5000 --json > proof-output/gateway-health.json 2> proof-output/gateway-health.err; then
+    if run_openclaw_gateway_call health --timeout 5000 --json > proof-output/gateway-health.json 2> proof-output/gateway-health.err; then
       return 0
     fi
     if [ -n "${GATEWAY_PID}" ] && ! kill -0 "${GATEWAY_PID}" >/dev/null 2>&1; then
@@ -119,8 +123,7 @@ start_real_gateway_and_seed_proposal() {
 }
 JSON
 
-  run_openclaw gateway call skills.proposals.create \
-    --url "${GATEWAY_URL}" \
+  run_openclaw_gateway_call skills.proposals.create \
     --params "$(cat proof-output/gateway-proposal-create-params.json)" \
     --timeout 20000 \
     --json > proof-output/gateway-proposal-create.json
@@ -149,14 +152,12 @@ PY
   local proposal_id
   proposal_id="$(tr -d '[:space:]' < proof-output/proposal-id.txt)"
 
-  run_openclaw gateway call skills.proposals.list \
-    --url "${GATEWAY_URL}" \
+  run_openclaw_gateway_call skills.proposals.list \
     --params '{}' \
     --timeout 20000 \
     --json > proof-output/gateway-proposals-list.json
 
-  run_openclaw gateway call skills.proposals.inspect \
-    --url "${GATEWAY_URL}" \
+  run_openclaw_gateway_call skills.proposals.inspect \
     --params "{\"proposalId\":\"${proposal_id}\"}" \
     --timeout 20000 \
     --json > proof-output/gateway-proposal-inspect.json
