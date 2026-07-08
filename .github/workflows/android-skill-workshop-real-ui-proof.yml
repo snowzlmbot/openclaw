@@ -79,6 +79,10 @@ jobs:
           install-deps: 'true'
           save-actions-cache: 'false'
 
+      - name: Build OpenClaw CLI for proof Gateway
+        shell: bash
+        run: pnpm build:docker
+
       - name: Setup Java
         uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287
         with:
