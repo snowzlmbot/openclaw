@@ -6,7 +6,7 @@ mkdir -p proof-output
 APP_ID="ai.openclaw.app"
 SETTINGS_TEXT="Settings"
 SKILL_WORKSHOP_TEXT="Skill Workshop"
-PROPOSAL_TITLE="Proof Mobile Skill"
+PROPOSAL_TITLE="Create Proof Mobile Skill"
 PROPOSAL_DETAIL_TEXT="Android real Gateway media proof"
 GATEWAY_PORT="18789"
 GATEWAY_DEVICE_HOST="10.0.2.2"
@@ -213,7 +213,7 @@ for node in re.findall(r'<node\b[^>]*/?>', xml):
     desc_match = re.search(r'content-desc="([^"]*)"', node)
     text = html.unescape(text_match.group(1) if text_match else '')
     desc = html.unescape(desc_match.group(1) if desc_match else '')
-    if needle not in (text, desc):
+    if needle not in text and needle not in desc:
         continue
     bounds = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node)
     if not bounds:
@@ -320,13 +320,14 @@ copy_ui_xml proof-output/03-skill-workshop-list-ui.xml
 record_screen /sdcard/openclaw-skill-workshop-list.mp4 proof-output/skill-workshop-real-gateway-list.mp4 6
 
 # Open the proposal detail. Selecting the real proposal triggers skills.proposals.inspect in the app runtime.
-tap_text "Open" || tap_text "$PROPOSAL_TITLE"
+tap_text "Open" || tap_text "$PROPOSAL_TITLE" "300 1545" || true
+adb shell input swipe 540 2100 540 660 650 || true
 wait_for_text "$PROPOSAL_DETAIL_TEXT" 120
 capture_png /sdcard/openclaw-04-skill-workshop-detail.png proof-output/04-real-gateway-proposal-detail.png
 copy_ui_xml proof-output/04-skill-workshop-detail-ui.xml
 
 # Scroll to the lifecycle action controls and capture the admin-gated action area.
-adb shell input swipe 540 2050 540 760 550 || true
+adb shell input swipe 540 2100 540 650 650 || true
 wait_for_text "Quarantine" 60
 capture_png /sdcard/openclaw-05-skill-workshop-actions.png proof-output/05-skill-workshop-admin-actions.png
 copy_ui_xml proof-output/05-skill-workshop-actions-ui.xml
