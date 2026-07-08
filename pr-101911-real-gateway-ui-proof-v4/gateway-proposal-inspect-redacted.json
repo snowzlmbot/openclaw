@@ -1,0 +1,47 @@
+{
+  "record": {
+    "schema": "openclaw.skill-workshop.proposal.v1",
+    "id": "proof-mobile-skill-20260708-a72f2e1aba",
+    "kind": "create",
+    "status": "pending",
+    "title": "Create Proof Mobile Skill",
+    "description": "Android real Gateway media proof for PR 101911",
+    "createdAt": "2026-07-08T10:51:54.530Z",
+    "updatedAt": "2026-07-08T10:51:54.530Z",
+    "createdBy": "cli",
+    "proposedVersion": "v1",
+    "draftFile": "PROPOSAL.md",
+    "draftHash": "3e63acf716d64a8e32d6831c33c059fb765e4b119e8e5ed29ae8dba8c808dd78",
+    "target": {
+      "skillName": "Proof Mobile Skill",
+      "skillKey": "proof-mobile-skill",
+      "skillDir": "<redacted-runner-path>",
+      "skillFile": "<redacted-runner-path>",
+      "source": "openclaw-workspace"
+    },
+    "scan": {
+      "state": "clean",
+      "scannedAt": "2026-07-08T10:51:54.530Z",
+      "critical": 0,
+      "warn": 0,
+      "info": 0,
+      "findings": []
+    },
+    "supportFiles": [
+      {
+        "path": "references/android-proof.md",
+        "sizeBytes": 91,
+        "hash": "92969b9a4a606f99baa56c2ca13054dbd97896f027019a784793ec60f91de105"
+      }
+    ],
+    "goal": "Prove the Android Settings Skill Workshop list and inspect flow against a live Gateway.",
+    "evidence": "Created inside snowzlmbot/openclaw GitHub Actions before Android emulator capture."
+  },
+  "content": "---\nname: \"proof-mobile-skill\"\ndescription: \"Android real Gateway media proof for PR 101911\"\nstatus: proposal\nversion: \"v1\"\ndate: \"2026-07-08T10:51:54.530Z\"\n---\n\n# Proof Mobile Skill\n\nAndroid real Gateway media proof for PR 101911.\n\nThis pending proposal is created by `openclaw skills workshop propose-create` inside the same temporary proof state. The Android Settings > Skill Workshop screen then loads it through the live Gateway `skills.proposals.list` and `skills.proposals.inspect` read paths.\n",
+  "supportFiles": [
+    {
+      "path": "references/android-proof.md",
+      "content": "This support file is created by the real proof workflow and inspected from the Android UI.\n"
+    }
+  ]
+}

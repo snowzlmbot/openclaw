@@ -1,0 +1,18 @@
+{
+  "schema": "openclaw.skill-workshop.proposals-manifest.v1",
+  "updatedAt": "2026-07-08T10:51:54.776Z",
+  "proposals": [
+    {
+      "id": "proof-mobile-skill-20260708-a72f2e1aba",
+      "kind": "create",
+      "status": "pending",
+      "title": "Create Proof Mobile Skill",
+      "description": "Android real Gateway media proof for PR 101911",
+      "skillName": "Proof Mobile Skill",
+      "skillKey": "proof-mobile-skill",
+      "createdAt": "2026-07-08T10:51:54.530Z",
+      "updatedAt": "2026-07-08T10:51:54.530Z",
+      "scanState": "clean"
+    }
+  ]
+}
