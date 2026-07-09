@@ -41,6 +41,134 @@ jobs:
             apps/android/**/gradle-wrapper.properties
             apps/android/gradle/libs.versions.toml
 
+      - name: Setup Node runtime
+        uses: ./.github/actions/setup-node-env
+        with:
+          install-bun: "false"
+          install-deps: "true"
+          save-actions-cache: "false"
+
+      - name: Real Gateway cron RPC contract proof
+        run: |
+          set -euo pipefail
+          proof_dir="artifacts/cron-proof/real-gateway"
+          mkdir -p "$proof_dir"
+
+          export HOME="$RUNNER_TEMP/openclaw-cron-proof-home"
+          export OPENCLAW_SKIP_CHANNELS=1
+          mkdir -p "$HOME"
+          token="cron-proof-token-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          port=18789
+          url="ws://127.0.0.1:${port}"
+
+          node scripts/run-node.mjs gateway run \
+            --dev \
+            --reset \
+            --allow-unconfigured \
+            --auth token \
+            --token "$token" \
+            --bind loopback \
+            --port "$port" \
+            --ws-log compact >"$proof_dir/gateway.log" 2>&1 &
+          gateway_pid="$!"
+          cleanup_gateway() {
+            kill "$gateway_pid" >/dev/null 2>&1 || true
+            wait "$gateway_pid" >/dev/null 2>&1 || true
+          }
+          trap cleanup_gateway EXIT
+
+          for attempt in $(seq 1 60); do
+            if node scripts/run-node.mjs gateway call health \
+              --url "$url" \
+              --token "$token" \
+              --json >"$proof_dir/health.json" 2>"$proof_dir/health.err"; then
+              break
+            fi
+            if ! kill -0 "$gateway_pid" >/dev/null 2>&1; then
+              echo "Gateway exited before health probe succeeded" >&2
+              tail -n 200 "$proof_dir/gateway.log" >&2 || true
+              exit 1
+            fi
+            if [ "$attempt" = "60" ]; then
+              echo "Timed out waiting for Gateway health" >&2
+              tail -n 200 "$proof_dir/gateway.log" >&2 || true
+              exit 1
+            fi
+            sleep 2
+          done
+
+          add_params="$proof_dir/cron-add-params.json"
+          cat >"$add_params" <<'JSON'
+          {
+            "name": "Android Cron Real Gateway Proof",
+            "schedule": { "kind": "at", "at": "2099-12-31T00:00:00.000Z" },
+            "payload": { "kind": "systemEvent", "text": "Android cron real gateway proof" },
+            "sessionTarget": "main",
+            "delivery": { "mode": "none" },
+            "enabled": true
+          }
+          JSON
+
+          node scripts/run-node.mjs gateway call cron.add \
+            --url "$url" \
+            --token "$token" \
+            --json \
+            --params "$(cat "$add_params")" >"$proof_dir/cron-add.json"
+          job_id="$(jq -r '.job.id // .id // empty' "$proof_dir/cron-add.json")"
+          if [ -z "$job_id" ]; then
+            echo "cron.add did not return a job id" >&2
+            cat "$proof_dir/cron-add.json" >&2
+            exit 1
+          fi
+
+          node scripts/run-node.mjs gateway call cron.get \
+            --url "$url" \
+            --token "$token" \
+            --json \
+            --params "{\"id\":\"${job_id}\"}" >"$proof_dir/cron-get.json"
+          jq -e --arg job_id "$job_id" \
+            '.id == $job_id and (.job == null) and (.createdAtMs | type == "number") and (.updatedAtMs | type == "number")' \
+            "$proof_dir/cron-get.json" >/dev/null
+
+          node scripts/run-node.mjs gateway call cron.update \
+            --url "$url" \
+            --token "$token" \
+            --json \
+            --params "{\"id\":\"${job_id}\",\"patch\":{\"enabled\":false}}" >"$proof_dir/cron-update-disable.json"
+          node scripts/run-node.mjs gateway call cron.update \
+            --url "$url" \
+            --token "$token" \
+            --json \
+            --params "{\"id\":\"${job_id}\",\"patch\":{\"enabled\":true}}" >"$proof_dir/cron-update-enable.json"
+          node scripts/run-node.mjs gateway call cron.run \
+            --url "$url" \
+            --token "$token" \
+            --json \
+            --params "{\"id\":\"${job_id}\",\"mode\":\"force\"}" >"$proof_dir/cron-run.json"
+          node scripts/run-node.mjs gateway call cron.runs \
+            --url "$url" \
+            --token "$token" \
+            --json \
+            --params "{\"id\":\"${job_id}\",\"limit\":20,\"sortDir\":\"desc\"}" >"$proof_dir/cron-runs.json"
+          node scripts/run-node.mjs gateway call cron.remove \
+            --url "$url" \
+            --token "$token" \
+            --json \
+            --params "{\"id\":\"${job_id}\"}" >"$proof_dir/cron-remove.json"
+
+          commit="$(git rev-parse HEAD)"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          cat >"$proof_dir/real-gateway-cron-proof.md" <<EOF
+          # Real Gateway cron RPC proof
+
+          - Target commit: \`${commit}\`
+          - Workflow run: ${run_url}
+          - Gateway mode: real OpenClaw Gateway process on GitHub-hosted \`ubuntu-24.04\`, token auth, loopback WebSocket.
+          - Verified methods: \`cron.add\`, \`cron.get\`, \`cron.update\` disable/enable, \`cron.run\`, \`cron.runs\`, \`cron.remove\`.
+          - Contract check: \`cron.get\` returned the cron job as the root payload object, with numeric \`createdAtMs\` and \`updatedAtMs\`; no stale \`payload.job\` wrapper was accepted.
+          - Artifact files: JSON request/response captures plus \`gateway.log\` in this artifact directory.
+          EOF
+
       - name: Cache Android SDK
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -123,13 +251,16 @@ jobs:
           failures = int(root.attrib.get("failures", "0"))
           errors = int(root.attrib.get("errors", "0"))
           cases = [case.attrib.get("name", "<unknown>") for case in root.findall("testcase")]
+          import subprocess
+          commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
           lines = [
               "# Android cron management proof",
               "",
-              f"- Commit: `{Path('.git/HEAD').read_text().strip()}`",
+              f"- Commit: `{commit}`",
               f"- Test class: `{root.attrib.get('name', 'unknown')}`",
               f"- Result: tests={tests}, failures={failures}, errors={errors}",
               "- Verified RPC path: Android `NodeRuntime` connected to a gateway WebSocket, then emitted `cron.run`, `cron.update`, and `cron.remove` from admin-scoped controls.",
+              "- Verified detail path: Android loaded cron job details from root-object `cron.get` payloads and loaded `cron.runs` history.",
               "- Verified guard path: Android blocks mutation RPCs when the operator session lacks `operator.admin`.",
               "",
               "## Test cases",
@@ -186,6 +317,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: openclaw-android-cron-management-screenshot
-          path: apps/android/fastlane/metadata/android/en-US/images/phoneScreenshots/openclaw-cron.png
+          name: openclaw-android-cron-management-media-evidence
+          path: |
+            apps/android/fastlane/metadata/android/en-US/images/phoneScreenshots/openclaw-cron.jpg
+            apps/android/fastlane/metadata/android/en-US/images/phoneScreenshots/openclaw-cron.raw.png
+            .artifacts/android-screenshots/latest/**
           if-no-files-found: error
