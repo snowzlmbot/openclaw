@@ -409,8 +409,8 @@ jobs:
           }
           wait_for_boot
           timeout 420 /tmp/openclaw-models-capture.sh
-          grep -q '"method": "models.configure"' proof-output/proof-gateway.jsonl
-          grep -q '"method": "models.remove"' proof-output/proof-gateway.jsonl
+          grep -q '"method": "models.list"' proof-output/proof-gateway.jsonl
+          grep -q '"method": "models.authStatus"' proof-output/proof-gateway.jsonl
           grep -q '"view": "provider-config"' proof-output/proof-gateway.jsonl
 
       - name: Summarize proof artifact
