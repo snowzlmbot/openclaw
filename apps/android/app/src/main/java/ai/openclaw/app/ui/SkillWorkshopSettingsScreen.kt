@@ -240,7 +240,9 @@ internal fun SkillWorkshopSettingsScreen(
   }
 }
 
-private enum class SkillWorkshopProposalAction(val label: String) {
+private enum class SkillWorkshopProposalAction(
+  val label: String,
+) {
   Apply("Apply"),
   Reject("Reject"),
   Quarantine("Quarantine"),
