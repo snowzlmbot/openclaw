@@ -57,6 +57,20 @@ class NodeRuntimeCronMutationTest {
         runtime.refreshCronJobs()
         waitUntil { runtime.cronJobs.value.any { it.id == "job-1" } }
 
+        runtime.loadCronJobDetail("job-1")
+        waitUntil { runtime.cronJobDetailState.value is GatewayCronJobDetailState.Loaded }
+        val detailState = runtime.cronJobDetailState.value as GatewayCronJobDetailState.Loaded
+        assertEquals("job-1", detailState.job.id)
+        assertEquals("Android Cron Proof", detailState.job.name)
+        assertEquals("0 9 * * *", detailState.job.scheduleCronExpr)
+        assertEquals(1, runtime.cronRunHistory.value.size)
+        assertEquals("run-1", runtime.cronRunHistory.value.first().runId)
+        assertEquals("ok", runtime.cronRunHistory.value.first().status)
+        val get = gateway.awaitMethod("cron.get")
+        assertEquals("job-1", get.stringParam("id"))
+        val runs = gateway.awaitMethod("cron.runs")
+        assertEquals("job-1", runs.stringParam("id"))
+
         runtime.runCronJob("job-1")
         val run = gateway.awaitMethod("cron.run")
         assertEquals("job-1", run.stringParam("id"))
@@ -212,7 +226,7 @@ class NodeRuntimeCronMutationTest {
       "connect" -> connectResponse(id = id, role = params["role"]?.jsonPrimitive?.content ?: "node", operatorScopes = operatorScopes)
       "cron.status" -> """{"type":"res","id":"$id","ok":true,"payload":{"enabled":true,"jobs":1,"nextWakeAtMs":4102444800000}}"""
       "cron.list" -> """{"type":"res","id":"$id","ok":true,"payload":{"jobs":[${cronJobJson()}]}}"""
-      "cron.get" -> """{"type":"res","id":"$id","ok":true,"payload":{"job":${cronJobJson()}}}"""
+      "cron.get" -> """{"type":"res","id":"$id","ok":true,"payload":${cronJobJson()}}"""
       "cron.runs" ->
         """
         {
@@ -268,8 +282,11 @@ class NodeRuntimeCronMutationTest {
       "payload":{"kind":"agentTurn","message":"proof"},
       "delivery":{"mode":"none"},
       "failureAlert":false,
-      "createdAt":4102440000000,
-      "updatedAt":4102440000000,
+      "createdAtMs":4102440000000,
+      "updatedAtMs":4102440000000,
+      "nextRunAtMs":4102444800000,
+      "lastRunAtMs":4102441200000,
+      "lastRunStatus":"ok",
       "state":{
         "nextRunAtMs":4102444800000,
         "lastStatus":"ok",
