@@ -4867,7 +4867,7 @@
     },
     {
       "kind": "ui-call",
-      "line": 263,
+      "line": 265,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "${action.action.label} proposal?",
       "surface": "android",
@@ -4875,7 +4875,7 @@
     },
     {
       "kind": "ui-named-argument",
-      "line": 266,
+      "line": 268,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "This will ${action.action.label.lowercase()} \"${action.title}\" and refresh Skill Workshop state from the gateway.",
       "surface": "android",
@@ -4883,7 +4883,7 @@
     },
     {
       "kind": "ui-call",
-      "line": 277,
+      "line": 279,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Cancel",
       "surface": "android",
@@ -4891,7 +4891,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 312,
+      "line": 314,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Refresh",
       "surface": "android",
@@ -4899,7 +4899,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 312,
+      "line": 314,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Refreshing",
       "surface": "android",
@@ -4907,7 +4907,7 @@
     },
     {
       "kind": "ui-named-argument",
-      "line": 326,
+      "line": 328,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Search proposals",
       "surface": "android",
@@ -4915,7 +4915,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 442,
+      "line": 444,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Open",
       "surface": "android",
@@ -4923,7 +4923,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 442,
+      "line": 444,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Selected",
       "surface": "android",
@@ -4931,7 +4931,7 @@
     },
     {
       "kind": "ui-named-argument",
-      "line": 505,
+      "line": 507,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Apply, reject, and quarantine require operator.admin scope. Reconnect with shared gateway auth or approve an operator.admin device scope upgrade to enable lifecycle actions.",
       "surface": "android",
@@ -4939,7 +4939,7 @@
     },
     {
       "kind": "ui-named-argument",
-      "line": 526,
+      "line": 528,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Skill Workshop inspect and apply actions",
       "surface": "android",
@@ -4947,7 +4947,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 530,
+      "line": 532,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Inspect",
       "surface": "android",
@@ -4955,7 +4955,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 530,
+      "line": 532,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Inspecting",
       "surface": "android",
@@ -4963,7 +4963,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 536,
+      "line": 538,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Apply",
       "surface": "android",
@@ -4971,7 +4971,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 536,
+      "line": 538,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Working",
       "surface": "android",
@@ -4979,7 +4979,7 @@
     },
     {
       "kind": "ui-named-argument",
-      "line": 552,
+      "line": 554,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Skill Workshop reject and quarantine actions",
       "surface": "android",
@@ -4987,7 +4987,7 @@
     },
     {
       "kind": "ui-named-argument",
-      "line": 556,
+      "line": 558,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Reject",
       "surface": "android",
@@ -4995,7 +4995,7 @@
     },
     {
       "kind": "ui-named-argument",
-      "line": 568,
+      "line": 570,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Quarantine",
       "surface": "android",
@@ -5003,7 +5003,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 646,
+      "line": 648,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Pending",
       "surface": "android",
@@ -5011,7 +5011,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 647,
+      "line": 649,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Held",
       "surface": "android",
@@ -5019,7 +5019,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 648,
+      "line": 650,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Applied",
       "surface": "android",
@@ -5027,7 +5027,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 649,
+      "line": 651,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Rejected",
       "surface": "android",
@@ -5035,7 +5035,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 650,
+      "line": 652,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "All",
       "surface": "android",
@@ -5043,7 +5043,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 676,
+      "line": 678,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/SkillWorkshopSettingsScreen.kt",
       "source": "Default agent",
       "surface": "android",

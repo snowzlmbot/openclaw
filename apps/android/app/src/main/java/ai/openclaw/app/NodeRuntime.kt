@@ -3888,7 +3888,8 @@ class NodeRuntime private constructor(
             mutationConfirmed = true
           } else {
             val statusLabel = updatedProposal?.status?.takeIf { it.isNotBlank() } ?: "unknown"
-            _skillWorkshopErrorText.value = "Gateway returned status '$statusLabel' after ${skillWorkshopActionVerb(action)}."
+            _skillWorkshopErrorText.value =
+              "Gateway returned status '$statusLabel' after ${skillWorkshopActionVerb(action)}."
           }
         }
       }
