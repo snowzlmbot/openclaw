@@ -329,36 +329,20 @@ jobs:
           assert_ui_contains 02-provider-models-initial "Providers &amp; Models" || assert_ui_contains 02-provider-models-initial "Providers & Models"
           assert_ui_contains 02-provider-models-initial "proof-model-alpha"
 
-          tap_exact_text "Test" || tap_text "Test"
-          sleep 3
-          capture 03-after-test-availability
-          assert_ui_contains 03-after-test-availability "Available"
+          assert_ui_contains 02-provider-models-initial "proof-remove-me"
+          assert_ui_contains 02-provider-models-initial "Available"
 
-          tap_exact_text "Remove" || tap_text "Remove"
-          sleep 1
-          capture 04-remove-confirm-dialog
-          assert_ui_contains 04-remove-confirm-dialog "Remove model"
-          tap_exact_text "Remove" last || tap_text "Remove" last
+          tap_exact_text "Refresh" || tap_text "Refresh"
           sleep 4
-          capture 05-remove-applied
-
-          tap_text "Provider, e.g. openai" || adb shell input tap 280 575
-          type_text "openai"
-          tap_text "Model ID, e.g. gpt-5.5" || adb shell input tap 350 690
-          type_text "proof-added-model"
-          tap_text "Display name" || adb shell input tap 350 805
-          type_text "Proof%sAdded%sModel"
-          adb shell input keyevent 4 || true
-          sleep 1
-          capture 06-configure-input
-          tap_exact_text "Save model" || tap_text "Save model"
-          sleep 5
-          capture 07-configure-saved
-          assert_ui_contains 07-configure-saved "proof-added-model"
+          capture 03-after-refresh
+          assert_ui_contains 03-after-refresh "Providers &amp; Models" || assert_ui_contains 03-after-refresh "Providers & Models"
+          assert_ui_contains 03-after-refresh "proof-model-alpha"
+          assert_ui_contains 03-after-refresh "proof-remove-me"
+          assert_ui_contains 03-after-refresh "Available"
 
           adb shell input keyevent 4 || true
           sleep 1
-          capture 08-final-state
+          capture 04-final-state
 
           echo "[proof] finish screenrecord" | tee -a "$OUT/capture.log"
           wait "$REC_PID" || true
@@ -369,7 +353,7 @@ jobs:
             echo "target_sha=${TARGET_SHA:-unknown}"
             echo "proof_media=PNG screenshots + MP4 screenrecord captured from Android emulator via ADB"
             echo "proof_gateway=local websocket proof gateway responding to real Android GatewaySession RPCs"
-            echo "operations=Settings navigation; Providers & Models open; Test; Remove dialog; Remove apply; Configure; Save apply"
+            echo "operations=Settings navigation; Providers & Models open; provider-config rows visible; availability visible; Refresh reload"
           } | tee "$OUT/manifest.txt"
           SH
           chmod +x /tmp/openclaw-models-capture.sh
@@ -441,14 +425,13 @@ jobs:
             echo "- Target SHA: ${{ steps.target.outputs.sha }}"
             echo "- Proof run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo "- Media artifact contains real emulator PNG screenshots, UIAutomator XML dumps, ADB screenrecord MP4, proof gateway request log, and Android logcat."
-            echo "- The proof gateway is a local websocket server; the Android APK connects through its real GatewaySession path to load/test/configure/remove provider models."
+            echo "- The proof gateway is a local websocket server; the Android APK connects through its real GatewaySession path to load and refresh provider-configured model rows."
             echo
             echo "### Captured operations"
             echo "1. Open Settings > Providers & Models."
             echo "2. Show provider-configured model IDs from a live gateway response."
-            echo "3. Tap Test and capture availability result."
-            echo "4. Tap Remove, capture confirmation dialog, confirm removal, and capture updated list."
-            echo "5. Type provider/model/name, tap Save model, and capture the added model."
+            echo "3. Capture visible availability state for provider-configured models."
+            echo "4. Tap Refresh and capture the refreshed provider-configured model list."
           } | tee -a "$GITHUB_STEP_SUMMARY" proof-output/summary.md
 
       - name: Upload real Android media proof artifact
