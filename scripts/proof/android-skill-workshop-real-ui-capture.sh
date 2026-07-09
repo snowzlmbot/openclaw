@@ -271,6 +271,31 @@ finish_record_action() {
 }
 
 seed_app_prefs() {
+  local stable_id="manual|${GATEWAY_DEVICE_HOST}|${GATEWAY_PORT}"
+  local registry_json
+  registry_json=$(python3 - <<'PY'
+import json
+import os
+host = os.environ["GATEWAY_DEVICE_HOST"]
+port = int(os.environ["GATEWAY_PORT"])
+stable_id = f"manual|{host}|{port}"
+print(json.dumps({
+  "version": 1,
+  "activeStableId": stable_id,
+  "entries": [
+    {
+      "stableId": stable_id,
+      "kind": "manual",
+      "name": f"{host}:{port}",
+      "host": host,
+      "port": port,
+      "tls": False,
+      "lastConnectedAtMs": 0,
+    }
+  ],
+}, separators=(",", ":")))
+PY
+)
   cat > proof-output/openclaw.node.xml <<XML
 <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
 <map>
@@ -279,14 +304,15 @@ seed_app_prefs() {
   <string name="gateway.manual.host">${GATEWAY_DEVICE_HOST}</string>
   <int name="gateway.manual.port" value="${GATEWAY_PORT}" />
   <boolean name="gateway.manual.tls" value="false" />
+  <string name="gateway.registry">${registry_json}</string>
 </map>
 XML
   adb push proof-output/openclaw.node.xml /data/local/tmp/openclaw.node.xml >/dev/null
   adb shell chmod 644 /data/local/tmp/openclaw.node.xml >/dev/null 2>&1 || true
   adb shell run-as "$APP_ID" mkdir -p shared_prefs
   adb shell run-as "$APP_ID" cp /data/local/tmp/openclaw.node.xml shared_prefs/openclaw.node.xml
+  echo "seeded_gateway_stable_id=${stable_id}" >> proof-output/preseeded-gateway.txt
 }
-
 launch_app_shell() {
   adb shell am force-stop "$APP_ID" || true
   timeout 30 adb shell monkey -p "$APP_ID" -c android.intent.category.LAUNCHER 1 > "proof-output/monkey-launch-${1}.log" || true
@@ -429,7 +455,7 @@ fi
   echo "runner=$(uname -a)"
   echo "proof_type=real GitHub Actions Android emulator capture against a temporary real OpenClaw Gateway"
   echo "route=launcher -> completed-onboarding app shell -> Settings tab -> Skill Workshop row -> real Gateway pending proposal -> inspect detail -> Android confirm dialog -> live reject/apply mutation -> Gateway list status verification"
-  echo "preseeded_state=onboarding.completed=true and manual loopback gateway endpoint only"
+  echo "preseeded_state=onboarding.completed=true plus manual loopback gateway registry/legacy endpoint only"
   echo "gateway_auth=auth none on loopback-only temporary proof Gateway"
   echo "gateway_rpc=health, skills.proposals.list, skills.proposals.inspect via Android runtime, skills.proposals.reject/apply via Android runtime, post-action list verification"
   echo "proposal_create=cli skills workshop propose-create against the same temporary proof state"
