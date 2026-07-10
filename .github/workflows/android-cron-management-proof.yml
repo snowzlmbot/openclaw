@@ -98,16 +98,15 @@ jobs:
           done
 
           add_params="$proof_dir/cron-add-params.json"
-          cat >"$add_params" <<'JSON'
-          {
-            "name": "Android Cron Real Gateway Proof",
-            "schedule": { "kind": "at", "at": "2099-12-31T00:00:00.000Z" },
-            "payload": { "kind": "systemEvent", "text": "Android cron real gateway proof" },
-            "sessionTarget": "main",
-            "delivery": { "mode": "none" },
-            "enabled": true
-          }
-          JSON
+          proof_at="$(date -u -d '+1 year' '+%Y-%m-%dT%H:%M:%S.000Z')"
+          jq -n --arg at "$proof_at" '{
+            name: "Android Cron Real Gateway Proof",
+            schedule: { kind: "at", at: $at },
+            payload: { kind: "systemEvent", text: "Android cron real gateway proof" },
+            sessionTarget: "main",
+            delivery: { mode: "none" },
+            enabled: true
+          }' >"$add_params"
 
           node scripts/run-node.mjs gateway call cron.add \
             --url "$url" \
