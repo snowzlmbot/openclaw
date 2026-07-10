@@ -198,7 +198,7 @@ describe("skills gateway handlers (clawhub)", () => {
     expect(JSON.stringify(response)).not.toContain('"security":');
   });
 
-  it("fetches explicit ClawHub verdicts for pre-install review without scanning installed skills", async () => {
+  it("fetches one admin-scoped ClawHub verdict for pre-install review without scanning installed skills", async () => {
     fetchClawHubSkillSecurityVerdictsMock.mockResolvedValue({
       schema: "clawhub.skill.security-verdicts.v1",
       items: [
@@ -220,8 +220,10 @@ describe("skills gateway handlers (clawhub)", () => {
       ],
     });
 
-    const { ok, response, error } = await callSkillsHandler("skills.securityVerdicts", {
-      items: [{ slug: "calendar", version: "2.0.0", ownerHandle: "openclaw" }],
+    const { ok, response, error } = await callSkillsHandler("skills.securityReview", {
+      slug: "calendar",
+      version: "2.0.0",
+      ownerHandle: "openclaw",
     });
 
     expect(resolveAgentWorkspaceDirMock).not.toHaveBeenCalled();
@@ -247,22 +249,34 @@ describe("skills gateway handlers (clawhub)", () => {
           publisherDisplayName: "OpenClaw",
           securityStatus: "clean",
           securityPassed: true,
+          disposition: "clean",
         }),
       ],
     });
   });
 
-  it("normalizes explicit ClawHub verdict owner handles before requesting audits", async () => {
+  it("normalizes a pre-install ClawHub verdict owner handle before requesting an audit", async () => {
     fetchClawHubSkillSecurityVerdictsMock.mockResolvedValue({
       schema: "clawhub.skill.security-verdicts.v1",
-      items: [],
+      items: [
+        {
+          ok: true,
+          decision: "pass",
+          reasons: [],
+          requestedSlug: "calendar",
+          slug: "calendar",
+          requestedVersion: "2.0.0",
+          version: "2.0.0",
+          publisherHandle: "openclaw",
+          security: { rawStatus: "clean", passed: true },
+        },
+      ],
     });
 
-    const { ok, error } = await callSkillsHandler("skills.securityVerdicts", {
-      items: [
-        { slug: "calendar", version: "2.0.0", ownerHandle: " openclaw " },
-        { slug: "terminal", version: "1.0.0", ownerHandle: "   " },
-      ],
+    const { ok, error } = await callSkillsHandler("skills.securityReview", {
+      slug: "calendar",
+      version: "2.0.0",
+      ownerHandle: " openclaw ",
     });
 
     expect(ok).toBe(true);
@@ -271,33 +285,74 @@ describe("skills gateway handlers (clawhub)", () => {
     expect(buildWorkspaceSkillStatusMock).not.toHaveBeenCalled();
     expect(fetchClawHubSkillSecurityVerdictsMock).toHaveBeenCalledWith({
       baseUrl: "https://clawhub.ai",
-      items: [
-        { slug: "calendar", version: "2.0.0", ownerHandle: "openclaw" },
-        { slug: "terminal", version: "1.0.0" },
-      ],
+      items: [{ slug: "calendar", version: "2.0.0", ownerHandle: "openclaw" }],
       skipAuth: true,
     });
   });
 
-  it("treats an explicit empty ClawHub verdict batch as a no-op without scanning skills", async () => {
-    const { ok, response, error } = await callSkillsHandler("skills.securityVerdicts", {
-      items: [],
+  it("rejects a pre-install ClawHub verdict for a different publisher", async () => {
+    fetchClawHubSkillSecurityVerdictsMock.mockResolvedValue({
+      schema: "clawhub.skill.security-verdicts.v1",
+      items: [
+        {
+          ok: true,
+          decision: "pass",
+          reasons: [],
+          requestedSlug: "calendar",
+          slug: "calendar",
+          requestedVersion: "2.0.0",
+          version: "2.0.0",
+          publisherHandle: "attacker",
+          security: { rawStatus: "clean", passed: true },
+        },
+      ],
     });
 
-    expect(resolveAgentWorkspaceDirMock).not.toHaveBeenCalled();
-    expect(buildWorkspaceSkillStatusMock).not.toHaveBeenCalled();
-    expect(fetchClawHubSkillSecurityVerdictsMock).not.toHaveBeenCalled();
-    expect(ok).toBe(true);
-    expect(error).toBeUndefined();
-    expectEmptySecurityVerdicts(response);
+    const { ok, error } = await callSkillsHandler("skills.securityReview", {
+      slug: "calendar",
+      version: "2.0.0",
+      ownerHandle: "openclaw",
+    });
+
+    expect(ok).toBe(false);
+    expect(error).toMatchObject({
+      code: "UNAVAILABLE",
+      message: "ClawHub returned a security verdict for a different publisher.",
+    });
   });
 
-  it("rejects oversized explicit ClawHub verdict batches", async () => {
-    const { ok, error } = await callSkillsHandler("skills.securityVerdicts", {
-      items: Array.from({ length: 26 }, (_, index) => ({
-        slug: `skill-${index}`,
-        version: "1.0.0",
-      })),
+  it("maps malware reasons to a blocked pre-install disposition", async () => {
+    fetchClawHubSkillSecurityVerdictsMock.mockResolvedValue({
+      schema: "clawhub.skill.security-verdicts.v1",
+      items: [
+        {
+          ok: false,
+          decision: "fail",
+          reasons: ["malware_detected"],
+          requestedSlug: "calendar",
+          slug: "calendar",
+          requestedVersion: "2.0.0",
+          version: "2.0.0",
+          publisherHandle: "openclaw",
+          security: { rawStatus: "suspicious", passed: false },
+        },
+      ],
+    });
+
+    const { ok, response, error } = await callSkillsHandler("skills.securityReview", {
+      slug: "calendar",
+      version: "2.0.0",
+      ownerHandle: "openclaw",
+    });
+
+    expect(ok).toBe(true);
+    expect(error).toBeUndefined();
+    expect(response).toMatchObject({ items: [{ disposition: "blocked" }] });
+  });
+
+  it("rejects a pre-install ClawHub review without an exact version", async () => {
+    const { ok, error } = await callSkillsHandler("skills.securityReview", {
+      slug: "calendar",
     });
 
     expect(ok).toBe(false);

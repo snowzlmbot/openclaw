@@ -22,6 +22,7 @@ describe("listGatewayMethods", () => {
   it("advertises ClawHub skill trust methods", () => {
     const methods = listGatewayMethods();
     expect(methods).toContain("skills.securityVerdicts");
+    expect(methods).toContain("skills.securityReview");
     expect(methods).toContain("skills.skillCard");
   });
 

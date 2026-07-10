@@ -528,6 +528,8 @@ import {
   SkillsSearchParamsSchema,
   type SkillsSearchResult,
   SkillsSearchResultSchema,
+  type SkillsSecurityReviewParams,
+  SkillsSecurityReviewParamsSchema,
   type SkillsSecurityVerdictsParams,
   SkillsSecurityVerdictsParamsSchema,
   type SkillsSecurityVerdictsResult,
@@ -1010,6 +1012,9 @@ export const validateSkillsProposalActionParams = lazyCompile<SkillsProposalActi
 export const validateSkillsSecurityVerdictsParams = lazyCompile<SkillsSecurityVerdictsParams>(
   SkillsSecurityVerdictsParamsSchema,
 );
+export const validateSkillsSecurityReviewParams = lazyCompile<SkillsSecurityReviewParams>(
+  SkillsSecurityReviewParamsSchema,
+);
 export const validateSkillsSkillCardParams = lazyCompile<SkillsSkillCardParams>(
   SkillsSkillCardParamsSchema,
 );
@@ -1385,6 +1390,7 @@ export {
   SkillsCuratorStatusResultSchema,
   SkillsSearchParamsSchema,
   SkillsSearchResultSchema,
+  SkillsSecurityReviewParamsSchema,
   SkillsDetailParamsSchema,
   SkillsDetailResultSchema,
   SkillsProposalsListParamsSchema,
@@ -1607,6 +1613,7 @@ export type {
   SkillsCuratorStatusResult,
   SkillsSearchParams,
   SkillsSearchResult,
+  SkillsSecurityReviewParams,
   SkillsDetailParams,
   SkillsDetailResult,
   SkillsProposalsListParams,

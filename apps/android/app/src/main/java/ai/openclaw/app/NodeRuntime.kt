@@ -764,6 +764,7 @@ class NodeRuntime private constructor(
   private val skillWorkshopMutationSeq = AtomicLong(0)
   private val _skillMutationKeys = MutableStateFlow<Set<String>>(emptySet())
   val skillMutationKeys: StateFlow<Set<String>> = _skillMutationKeys.asStateFlow()
+  private val clawHubSkillInstallMutex = Mutex()
   private val _clawHubSkillSearchState = MutableStateFlow(GatewayClawHubSkillSearchState())
   val clawHubSkillSearchState: StateFlow<GatewayClawHubSkillSearchState> = _clawHubSkillSearchState.asStateFlow()
   private val clawHubSkillSearchSeq = AtomicLong(0)
@@ -4229,8 +4230,8 @@ class NodeRuntime private constructor(
     }
   }
 
-  private suspend fun refreshSkillsFromGateway() {
-    val gatewayScope = captureGatewayDataScope() ?: return
+  private suspend fun refreshSkillsFromGateway(): Boolean {
+    val gatewayScope = captureGatewayDataScope() ?: return false
     publishGatewayData(gatewayScope) {
       _skillsRefreshing.value = true
       _skillsErrorText.value = null
@@ -4238,7 +4239,7 @@ class NodeRuntime private constructor(
     if (!operatorConnected) {
       _skillsSummary.value = GatewaySkillsSummary(skills = emptyList())
       _skillsRefreshing.value = false
-      return
+      return false
     }
     try {
       val res = requestGatewayData(gatewayScope, "skills.status", "{}")
@@ -4254,8 +4255,10 @@ class NodeRuntime private constructor(
           skills = parseSkillSummaries(root?.get("skills") as? JsonArray),
         )
       publishGatewayData(gatewayScope) { _skillsSummary.value = summary }
+      return true
     } catch (_: Throwable) {
       publishGatewayData(gatewayScope) { _skillsErrorText.value = "Could not load skills." }
+      return false
     } finally {
       publishGatewayData(gatewayScope) { _skillsRefreshing.value = false }
     }
@@ -4684,23 +4687,14 @@ class NodeRuntime private constructor(
         try {
           val verdictParams =
             buildJsonObject {
-              put(
-                "items",
-                JsonArray(
-                  listOf(
-                    buildJsonObject {
-                      put("slug", JsonPrimitive(slug))
-                      put("version", JsonPrimitive(resolvedVersion))
-                      ownerHandle?.let { put("ownerHandle", JsonPrimitive(it)) }
-                    },
-                  ),
-                ),
-              )
+              put("slug", JsonPrimitive(slug))
+              put("version", JsonPrimitive(resolvedVersion))
+              ownerHandle?.let { put("ownerHandle", JsonPrimitive(it)) }
             }
           val verdictRaw =
             requestGatewayData(
               gatewayScope,
-              "skills.securityVerdicts",
+              "skills.securityReview",
               verdictParams.toString(),
             )
           val verdictRoot = json.parseToJsonElement(verdictRaw).asObjectOrNull()
@@ -4775,6 +4769,19 @@ class NodeRuntime private constructor(
     acknowledgeClawHubRisk: Boolean,
     version: String?,
   ) {
+    val claimed =
+      clawHubSkillInstallMutex.withLock {
+        if (slug in _clawHubSkillSearchState.value.installingSlugs) {
+          false
+        } else {
+          _clawHubSkillSearchState.value =
+            _clawHubSkillSearchState.value.copy(
+              installingSlugs = _clawHubSkillSearchState.value.installingSlugs + slug,
+            )
+          true
+        }
+      }
+    if (!claimed) return
     val gatewayScope = captureGatewayDataScope()
     if (gatewayScope == null || !operatorConnected) {
       _clawHubSkillSearchState.value =
@@ -4784,6 +4791,7 @@ class NodeRuntime private constructor(
           errorText = "Connect the gateway to install ClawHub skills.",
           messageText = null,
         )
+      releaseClawHubInstallClaim(slug)
       return
     }
     if (!operatorAdminScopeAvailable.value) {
@@ -4796,13 +4804,13 @@ class NodeRuntime private constructor(
           errorText = "This gateway connection needs operator.admin to install ClawHub skills.",
           messageText = null,
         )
+      releaseClawHubInstallClaim(slug)
       return
     }
     val attemptedVersion = version?.trim()?.takeIf { it.isNotEmpty() }
     publishGatewayData(gatewayScope) {
       _clawHubSkillSearchState.value =
         _clawHubSkillSearchState.value.copy(
-          installingSlugs = _clawHubSkillSearchState.value.installingSlugs + slug,
           acknowledgeSlug = null,
           acknowledgeVersion = null,
           installReview = null,
@@ -4834,16 +4842,23 @@ class NodeRuntime private constructor(
           .asStringOrNull()
           ?.trim()
           ?.takeIf { it.isNotEmpty() }
+      val refreshed = refreshSkillsFromGateway()
       publishGatewayData(gatewayScope) {
         _clawHubSkillSearchState.value =
           _clawHubSkillSearchState.value.copy(
             acknowledgeSlug = null,
             acknowledgeVersion = null,
-            messageText = formatClawHubInstallMessage(message ?: "Installed $slug.", warning),
+            messageText =
+              formatClawHubInstallMessage(
+                message ?: "Installed $slug.",
+                listOfNotNull(
+                  warning,
+                  if (refreshed) null else "Installed, but the skills list could not be refreshed.",
+                ).joinToString("\n").ifBlank { null },
+              ),
             errorText = null,
           )
       }
-      refreshSkillsFromGateway()
     } catch (err: CancellationException) {
       throw err
     } catch (err: GatewayRequestRejected) {
@@ -4881,11 +4896,27 @@ class NodeRuntime private constructor(
           )
       }
     } finally {
-      publishGatewayData(gatewayScope) {
+      releaseClawHubInstallClaim(slug, gatewayScope)
+    }
+  }
+
+  private suspend fun releaseClawHubInstallClaim(
+    slug: String,
+    gatewayScope: GatewayDataScope? = null,
+  ) {
+    clawHubSkillInstallMutex.withLock {
+      if (gatewayScope == null) {
         _clawHubSkillSearchState.value =
           _clawHubSkillSearchState.value.copy(
             installingSlugs = _clawHubSkillSearchState.value.installingSlugs - slug,
           )
+      } else {
+        publishGatewayData(gatewayScope) {
+          _clawHubSkillSearchState.value =
+            _clawHubSkillSearchState.value.copy(
+              installingSlugs = _clawHubSkillSearchState.value.installingSlugs - slug,
+            )
+        }
       }
     }
   }
@@ -6254,6 +6285,7 @@ private fun parseClawHubSecurityVerdict(obj: JsonObject?): GatewayClawHubSkillSe
     securityAuditUrl = obj["securityAuditUrl"].asTrimmedNonEmptyString(),
     securityStatus = obj["securityStatus"].asTrimmedNonEmptyString(),
     securityPassed = obj.optionalBoolean("securityPassed"),
+    disposition = obj["disposition"].asTrimmedNonEmptyString(),
   )
 }
 
@@ -6343,14 +6375,7 @@ private fun clawHubSafetyDetail(
 
 private fun clawHubReviewBlocked(verdict: GatewayClawHubSkillSecurityVerdict?): Boolean {
   verdict ?: return false
-  val status = verdict.securityStatus?.lowercase()
-  val decision = verdict.decision?.lowercase()
-  return status == "malicious" ||
-    decision == "blocked" ||
-    verdict.reasons.any { reason ->
-      reason.contains("malicious", ignoreCase = true) ||
-        reason.contains("blocked", ignoreCase = true)
-    }
+  return verdict.disposition == "blocked"
 }
 
 private fun clawHubReviewRequiresAcknowledgement(
@@ -6361,11 +6386,7 @@ private fun clawHubReviewRequiresAcknowledgement(
   return !clawHubReviewClean(verdict)
 }
 
-private fun clawHubReviewClean(verdict: GatewayClawHubSkillSecurityVerdict): Boolean =
-  verdict.ok &&
-    verdict.decision?.lowercase() == "pass" &&
-    verdict.securityPassed == true &&
-    verdict.securityStatus?.lowercase() == "clean"
+private fun clawHubReviewClean(verdict: GatewayClawHubSkillSecurityVerdict): Boolean = verdict.disposition == "clean"
 
 data class GatewayClawHubSkillSearchState(
   val query: String = "",
@@ -6414,6 +6435,7 @@ data class GatewayClawHubSkillSecurityVerdict(
   val securityAuditUrl: String?,
   val securityStatus: String?,
   val securityPassed: Boolean?,
+  val disposition: String?,
 )
 
 data class GatewaySkillSummary(

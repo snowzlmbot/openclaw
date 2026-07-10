@@ -128,6 +128,7 @@ export const CORE_GATEWAY_METHOD_SPECS: readonly CoreGatewayMethodSpec[] = [
   { name: "skills.search", scope: "operator.read" },
   { name: "skills.detail", scope: "operator.read" },
   { name: "skills.securityVerdicts", scope: "operator.read" },
+  { name: "skills.securityReview", scope: "operator.admin" },
   { name: "skills.skillCard", scope: "operator.read" },
   { name: "skills.bins", scope: "node" },
   { name: "skills.upload.begin", scope: "operator.admin" },

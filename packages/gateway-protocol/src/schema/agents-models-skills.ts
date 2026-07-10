@@ -428,19 +428,16 @@ export const SkillsDetailParamsSchema = Type.Object(
 export const SkillsSecurityVerdictsParamsSchema = Type.Object(
   {
     agentId: Type.Optional(NonEmptyString),
-    items: Type.Optional(
-      Type.Array(
-        Type.Object(
-          {
-            slug: NonEmptyString,
-            version: NonEmptyString,
-            ownerHandle: Type.Optional(NonEmptyString),
-          },
-          { additionalProperties: false },
-        ),
-        { maxItems: 25 },
-      ),
-    ),
+  },
+  { additionalProperties: false },
+);
+
+/** Reads one registry security verdict before an admin-scoped install. */
+export const SkillsSecurityReviewParamsSchema = Type.Object(
+  {
+    slug: NonEmptyString,
+    version: NonEmptyString,
+    ownerHandle: Type.Optional(NonEmptyString),
   },
   { additionalProperties: false },
 );
@@ -533,6 +530,11 @@ export const SkillsSecurityVerdictsResultSchema = Type.Object(
           securityAuditUrl: Type.Optional(Type.Union([Type.String(), Type.Null()])),
           securityStatus: Type.Optional(Type.Union([Type.String(), Type.Null()])),
           securityPassed: Type.Optional(Type.Union([Type.Boolean(), Type.Null()])),
+          disposition: Type.Union([
+            Type.Literal("clean"),
+            Type.Literal("review-required"),
+            Type.Literal("blocked"),
+          ]),
           error: Type.Optional(
             Type.Object(
               {

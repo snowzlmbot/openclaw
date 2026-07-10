@@ -17,6 +17,7 @@ import {
   validateSkillsProposalsListParams,
   validateSkillsProposalUpdateParams,
   validateSkillsSearchParams,
+  validateSkillsSecurityReviewParams,
   validateSkillsSecurityVerdictsParams,
   validateSkillsSkillCardParams,
   validateSkillsStatusParams,
@@ -106,28 +107,46 @@ type ResolvedSkillsWorkspace = Extract<
   { ok: true }
 >;
 
-type ExplicitClawHubVerdictItem = { slug: string; version: string; ownerHandle?: string };
-type ClawHubVerdictTarget = ExplicitClawHubVerdictItem & { registry: string };
+type ClawHubVerdictTarget = {
+  registry: string;
+  slug: string;
+  version: string;
+  ownerHandle?: string;
+};
 
-function hasExplicitClawHubVerdictItems(
-  params: unknown,
-): params is { items?: ExplicitClawHubVerdictItem[] } {
-  return params !== null && typeof params === "object" && Object.hasOwn(params, "items");
+function buildClawHubSecurityReviewTarget(params: {
+  slug: string;
+  version: string;
+  ownerHandle?: string;
+}): ClawHubVerdictTarget {
+  const registry = resolveClawHubBaseUrl();
+  const ownerHandle = params.ownerHandle?.trim();
+  return {
+    registry,
+    slug: params.slug,
+    version: params.version,
+    ...(ownerHandle ? { ownerHandle } : {}),
+  };
 }
 
-function buildExplicitClawHubVerdictTargets(
-  items: readonly ExplicitClawHubVerdictItem[],
-): ClawHubVerdictTarget[] {
-  const registry = resolveClawHubBaseUrl();
-  return items.map((item) => {
-    const ownerHandle = item.ownerHandle?.trim();
-    return {
-      registry,
-      slug: item.slug,
-      version: item.version,
-      ...(ownerHandle ? { ownerHandle } : {}),
-    };
-  });
+function assertClawHubSecurityReviewIdentity(
+  target: ClawHubVerdictTarget,
+  item: Awaited<ReturnType<typeof fetchOpenClawSkillSecurityVerdicts>>[number] | undefined,
+): void {
+  if (!item) {
+    throw new Error(`ClawHub returned no security verdict for ${target.slug}@${target.version}.`);
+  }
+  if (
+    item.requestedSlug !== target.slug ||
+    item.requestedVersion !== target.version ||
+    item.slug !== target.slug ||
+    item.version !== target.version
+  ) {
+    throw new Error("ClawHub returned a security verdict for a different release.");
+  }
+  if (target.ownerHandle && item.publisherHandle !== target.ownerHandle) {
+    throw new Error("ClawHub returned a security verdict for a different publisher.");
+  }
 }
 
 async function respondWithClawHubVerdictTargets(
@@ -275,13 +294,6 @@ export const skillsHandlers: GatewayRequestHandlers = {
       return;
     }
     try {
-      if (hasExplicitClawHubVerdictItems(params)) {
-        await respondWithClawHubVerdictTargets(
-          buildExplicitClawHubVerdictTargets(params.items ?? []),
-          respond,
-        );
-        return;
-      }
       const resolved = resolveSkillsAgentWorkspace(params, context);
       if (!resolved.ok) {
         respond(false, undefined, resolved.error);
@@ -291,6 +303,26 @@ export const skillsHandlers: GatewayRequestHandlers = {
         collectClawHubVerdictTargets(buildRemoteAwareWorkspaceSkillStatus(resolved)),
         respond,
       );
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatErrorMessage(err)));
+    }
+  },
+  "skills.securityReview": async ({ params, respond }) => {
+    if (
+      !assertValidParams(
+        params,
+        validateSkillsSecurityReviewParams,
+        "skills.securityReview",
+        respond,
+      )
+    ) {
+      return;
+    }
+    try {
+      const target = buildClawHubSecurityReviewTarget(params);
+      const items = await fetchOpenClawSkillSecurityVerdicts([target]);
+      assertClawHubSecurityReviewIdentity(target, items[0]);
+      respond(true, { schema: "openclaw.skills.security-verdicts.v1", items }, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatErrorMessage(err)));
     }

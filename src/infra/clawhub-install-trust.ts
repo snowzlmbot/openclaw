@@ -655,7 +655,7 @@ function isSkillVerdictStaleReason(reason: string): boolean {
   return normalized === "stale" || normalized === "scan:stale" || normalized === "stale_scan";
 }
 
-function isSkillVerdictBlockingReason(reason: string): boolean {
+export function isClawHubSkillVerdictBlockingReason(reason: string): boolean {
   const normalized = normalizeClawHubTrustToken(reason);
   return (
     normalized.includes("malicious") ||
@@ -723,7 +723,7 @@ function mapSkillSecurityVerdictToPackageSecurity(params: {
   if (!verdictPassed && reasons.length === 0) {
     reasons.push(decision ? `decision:${decision}` : "decision:fail");
   }
-  const hasBlockingReason = reasons.some(isSkillVerdictBlockingReason);
+  const hasBlockingReason = reasons.some(isClawHubSkillVerdictBlockingReason);
   const displayName = normalizeOptionalString(params.item.displayName);
   return {
     package: {

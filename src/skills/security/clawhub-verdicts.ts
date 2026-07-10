@@ -1,3 +1,4 @@
+import { isClawHubSkillVerdictBlockingReason } from "../../infra/clawhub-install-trust.js";
 // ClawHub verdict helpers normalize skill security verdicts from registry metadata.
 import {
   fetchClawHubSkillSecurityVerdicts,
@@ -15,6 +16,7 @@ type OpenClawSkillSecurityVerdictItem = Omit<
   decision: string;
   securityStatus?: string | null;
   securityPassed?: boolean | null;
+  disposition: "clean" | "review-required" | "blocked";
   error?: {
     code?: string;
     message?: string;
@@ -39,12 +41,31 @@ function readSecurityPassed(security: unknown): boolean | null | undefined {
   return typeof passed === "boolean" ? passed : undefined;
 }
 
+function securityVerdictDisposition(
+  item: ClawHubSkillSecurityVerdictItem,
+): "clean" | "review-required" | "blocked" {
+  const decision = item.decision.trim().toLowerCase();
+  const status = readSecurityStatus(item.security)?.trim().toLowerCase();
+  const passed = readSecurityPassed(item.security);
+  if (
+    decision === "blocked" ||
+    status === "malicious" ||
+    item.reasons.some(isClawHubSkillVerdictBlockingReason)
+  ) {
+    return "blocked";
+  }
+  return item.ok && decision === "pass" && status === "clean" && passed === true
+    ? "clean"
+    : "review-required";
+}
+
 function projectClawHubVerdictItem(
   item: ClawHubSkillSecurityVerdictItem,
   registry: string,
 ): OpenClawSkillSecurityVerdictItem {
   const projected: OpenClawSkillSecurityVerdictItem = {
     registry,
+    disposition: securityVerdictDisposition(item),
     ok: item.ok,
     decision: item.decision,
     reasons: item.reasons,

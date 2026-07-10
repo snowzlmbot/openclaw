@@ -219,7 +219,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 1519,
+      "line": 1520,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "Cron job started.",
       "surface": "android",
@@ -227,7 +227,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 1519,
+      "line": 1520,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "Cron run queued.",
       "surface": "android",
@@ -235,7 +235,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 1563,
+      "line": 1564,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "Cron job disabled.",
       "surface": "android",
@@ -243,7 +243,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 1563,
+      "line": 1564,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "Cron job enabled.",
       "surface": "android",
@@ -251,7 +251,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 3218,
+      "line": 3219,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "Failed: no secure gateway endpoint was detected. Enable gateway TLS or Tailscale Serve, or use a trusted private LAN address with Unencrypted selected.",
       "surface": "android",
@@ -259,7 +259,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 3220,
+      "line": 3221,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "Failed: secure endpoint reached, but TLS fingerprint verification timed out. Check Tailscale Serve or gateway TLS and retry.",
       "surface": "android",
@@ -267,7 +267,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 3222,
+      "line": 3223,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "Failed: couldn't reach the secure gateway endpoint for this host.",
       "surface": "android",
@@ -275,7 +275,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 4533,
+      "line": 4536,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "Could not disable skill.",
       "surface": "android",
@@ -283,7 +283,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 4533,
+      "line": 4536,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "Could not enable skill.",
       "surface": "android",
@@ -291,7 +291,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 6223,
+      "line": 6254,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "$message\n\n$warning",
       "surface": "android",
@@ -299,7 +299,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 6307,
+      "line": 6339,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "Unavailable",
       "surface": "android",
@@ -307,7 +307,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 6310,
+      "line": 6342,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "Clean",
       "surface": "android",
@@ -315,7 +315,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 6341,
+      "line": 6373,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "ClawHub returned a signed review verdict for this release.",
       "surface": "android",
