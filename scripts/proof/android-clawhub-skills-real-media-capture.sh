@@ -641,9 +641,10 @@ tap_text() {
 
 tap_install_for_skill() {
   local skill_title="$1"
-  copy_ui_xml proof-output/openclaw-ui.xml >/dev/null 2>&1 || true
   local coords=""
-  coords="$(python3 - "$skill_title" proof-output/openclaw-ui.xml <<'PY'
+  for attempt in $(seq 1 10); do
+    copy_ui_xml proof-output/openclaw-ui.xml >/dev/null 2>&1 || true
+    if coords="$(python3 - "$skill_title" proof-output/openclaw-ui.xml <<'PY'
 import html
 import re
 import sys
@@ -670,10 +671,19 @@ if len(buttons) != 1:
 _, left, top, right, bottom = buttons[0]
 print((left + right) // 2, (top + bottom) // 2)
 PY
-)"
-  echo "[proof] tap Install for '${skill_title}' at ${coords}" | tee -a proof-output/capture.log
-  adb shell input tap $coords
-  sleep 1
+)" && [ -n "$coords" ]; then
+      echo "[proof] tap Install for '${skill_title}' at ${coords} (attempt ${attempt})" | tee -a proof-output/capture.log
+      adb shell input tap $coords
+      sleep 1
+      return 0
+    fi
+    echo "[proof] '${skill_title}' card is not fully actionable; scroll for adjacent Install (attempt ${attempt})" | tee -a proof-output/capture.log
+    adb shell input swipe 540 2050 540 1450 400 || true
+    sleep 1
+  done
+  copy_ui_xml "proof-output/install-target-${skill_title// /-}-failure-ui.xml"
+  echo "Unable to find one actionable Install button for skill: ${skill_title}" >&2
+  return 1
 }
 
 capture_png() {
