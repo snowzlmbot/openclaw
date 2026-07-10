@@ -1029,7 +1029,7 @@ cat > proof-output/README.md <<EOF
 # Android ClawHub Skills real media proof
 
 - Repository head: $(git rev-parse HEAD)
-- PR head expectation: $(tr -d '[:space:]' < scripts/proof/pr101864-expected-head.txt 2>/dev/null || true)
+- PR head expectation: $(sed -n 's/^expected_pr_head=//p' proof-output/latest-head.txt)
 - Runner: GitHub-hosted ubuntu-24.04 + Android emulator API 35
 - App launch mode: normal Android launcher; screenshot mode disabled
 - Gateway path: Android Settings → Skills → clean install + refresh → review-required acknowledgement + install → malicious block
