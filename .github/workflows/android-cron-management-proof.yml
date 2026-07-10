@@ -105,6 +105,7 @@ jobs:
             payload: { kind: "systemEvent", text: "Android cron real gateway proof" },
             sessionTarget: "main",
             delivery: { mode: "none" },
+            deleteAfterRun: false,
             enabled: true
           }' >"$add_params"
 
