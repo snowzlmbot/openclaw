@@ -289,8 +289,6 @@ describe("models.list OpenAI routes", () => {
             models: {
               providers: {
                 openai: {
-                  api: "openai-responses",
-                  baseUrl: "https://api.openai.com/v1",
                   models: [{ id: "gpt-5.5", name: "GPT-5.5" }],
                 },
               },

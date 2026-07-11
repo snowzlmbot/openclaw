@@ -82,7 +82,7 @@ function requestModelsList(params: {
 }
 
 describe("models.list", () => {
-  it("projects source-authored provider inventory through canonical auth state", async () => {
+  it("keeps source-authored provider inventory when the canonical catalog is missing", async () => {
     const sourceConfig = {
       agents: {
         defaults: {

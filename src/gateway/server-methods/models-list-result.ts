@@ -209,6 +209,32 @@ function resolveGatewayModelCatalogRouteKey(entry: ModelCatalogEntry): string {
   );
 }
 
+function resolveProviderConfigInventoryEntries(params: {
+  authoredEntries: readonly ModelCatalogEntry[];
+  canonicalEntries: readonly ModelCatalogEntry[];
+}): ModelCatalogEntry[] {
+  const canonicalByKey = new Map<string, ModelCatalogEntry>();
+  for (const entry of params.canonicalEntries) {
+    const key = resolveGatewayModelCatalogRouteKey(entry);
+    if (!canonicalByKey.has(key)) {
+      canonicalByKey.set(key, entry);
+    }
+  }
+  const seen = new Set<string>();
+  const inventory: ModelCatalogEntry[] = [];
+  for (const authoredEntry of params.authoredEntries) {
+    const key = resolveGatewayModelCatalogRouteKey(authoredEntry);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    // Authored config owns inventory membership. Canonical catalog rows own
+    // route metadata; configured logical overrides are applied by the projector.
+    inventory.push(canonicalByKey.get(key) ?? authoredEntry);
+  }
+  return inventory;
+}
+
 /** Builds one per-agent, snapshot-scoped route projection for Gateway thinking metadata. */
 export function createGatewayAgentModelCatalogProjector(params: {
   cfg: OpenClawConfig;
@@ -378,8 +404,15 @@ export async function buildModelsListResult(params: {
   const routeVariants = snapshot.routeVariants;
   if (view === "provider-config") {
     const sourceConfig = getRuntimeConfigSourceSnapshot() ?? cfg;
+    const authoredEntries = buildProviderConfigModelCatalogForBrowse({
+      cfg: sourceConfig,
+      workspaceDir,
+    });
     const inventorySnapshot = {
-      entries: buildProviderConfigModelCatalogForBrowse({ cfg: sourceConfig, workspaceDir }),
+      entries: resolveProviderConfigInventoryEntries({
+        authoredEntries,
+        canonicalEntries: catalog,
+      }),
       routeVariants,
     };
     const inventoryProjector = createGatewayAgentModelCatalogProjector({
