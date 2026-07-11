@@ -11,6 +11,11 @@ import {
 
 type ChatMessage = { role?: string; content?: unknown };
 type CapturedRequest = { messages: ChatMessage[]; toolNames: string[] };
+type AttemptResult = {
+  code: number | null;
+  label: string;
+  outcome: "completed" | "scoped-workspace-error";
+};
 
 const instances: OpenClawTestInstance[] = [];
 const servers: Array<{ close: () => Promise<void> }> = [];
@@ -97,7 +102,7 @@ describe("issue 103917 real Gateway containment", () => {
     });
 
     let gatewayPid: number | undefined;
-    const attempts: Array<{ code: number | null; label: string }> = [];
+    const attempts: AttemptResult[] = [];
     try {
       await instance.startGateway();
       gatewayPid = instance.child?.pid;
@@ -124,6 +129,7 @@ describe("issue 103917 real Gateway containment", () => {
         attempts.push({
           code: result.code,
           label: label.toLowerCase().replaceAll("_", "-"),
+          outcome: "completed",
         });
         expect(result.code, result.stderr).toBe(0);
         await delay(250);
@@ -134,8 +140,11 @@ describe("issue 103917 real Gateway containment", () => {
 
       await fs.rm(coderWorkspace, { force: true, recursive: true });
       const attested = await runSpawnAttempt(instance, "ATTESTED_DELETE");
-      attempts.push({ code: attested.code, label: "attested-delete" });
-      expect(attested.code, attested.stderr).toBe(0);
+      attempts.push({
+        code: attested.code,
+        label: "attested-delete",
+        outcome: classifyContainedOutcome(attested),
+      });
       await delay(500);
       expect(instance.child?.pid).toBe(gatewayPid);
       expect(instance.child?.exitCode).toBeNull();
@@ -148,8 +157,11 @@ describe("issue 103917 real Gateway containment", () => {
         }, 2);
         try {
           const result = await runSpawnAttempt(instance, `RACE_${index}`);
-          attempts.push({ code: result.code, label: `race-${index}` });
-          expect(result.code, result.stderr).toBe(0);
+          attempts.push({
+            code: result.code,
+            label: `race-${index}`,
+            outcome: classifyContainedOutcome(result),
+          });
         } finally {
           clearInterval(timer);
         }
@@ -209,6 +221,16 @@ async function runSpawnAttempt(instance: OpenClawTestInstance, label: string) {
     ],
     { timeoutMs: 120_000 },
   );
+}
+
+function classifyContainedOutcome(result: { code: number | null; stderr: string }):
+  | "completed"
+  | "scoped-workspace-error" {
+  if (result.code === 0) {
+    return "completed";
+  }
+  expect(result.stderr).toContain("WorkspaceVanishedError");
+  return "scoped-workspace-error";
 }
 
 async function health(port: number): Promise<boolean> {

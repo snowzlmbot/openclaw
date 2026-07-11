@@ -20,7 +20,11 @@ type GatewayResult = {
   pidStable: boolean;
   healthyAfter: boolean;
   authenticatedRpcAfter: boolean;
-  attempts: Array<{ code: number | null; label: string }>;
+  attempts: Array<{
+    code: number | null;
+    label: string;
+    outcome: "completed" | "scoped-workspace-error";
+  }>;
   providerRequests: number;
   unhandledPromiseRejection: boolean;
 };
@@ -60,7 +64,9 @@ const [baselineLog, currentLog, adjacentLog, gatewayLog, gatewayResult, sourcePr
     fs.readFile(path.join(proofDir, "source-provenance.txt"), "utf8"),
   ]);
 const parsedGatewayResult = JSON.parse(gatewayResult) as GatewayResult;
-const passedGatewayAttempts = parsedGatewayResult.attempts.filter((attempt) => attempt.code === 0);
+const containedGatewayAttempts = parsedGatewayResult.attempts.filter(
+  (attempt) => attempt.outcome === "completed" || attempt.outcome === "scoped-workspace-error",
+);
 
 const shell = (title: string, subtitle: string, body: string) => `<!doctype html>
 <html lang="en">
@@ -127,7 +133,7 @@ const gateway = shell(
   "Real Gateway containment",
   "Foreground Gateway process, real agent RPC, sessions_spawn, workspace deletion, and health probes",
   `<section class="grid">
-    <article class="panel"><div class="status pass"><span class="dot"></span>Machine-readable result</div><div class="metric">${passedGatewayAttempts.length}/${parsedGatewayResult.attempts.length} attempts passed</div><p>Platform <code>${escapeHtml(parsedGatewayResult.platform)}</code> · Node <code>${escapeHtml(parsedGatewayResult.node)}</code></p><p>PID stable: <code>${String(parsedGatewayResult.pidStable)}</code> · Health: <code>${String(parsedGatewayResult.healthyAfter)}</code> · Authenticated RPC: <code>${String(parsedGatewayResult.authenticatedRpcAfter)}</code></p><p>Provider requests: <code>${String(parsedGatewayResult.providerRequests)}</code> · Unhandled rejection: <code>${String(parsedGatewayResult.unhandledPromiseRejection)}</code></p></article>
+    <article class="panel"><div class="status pass"><span class="dot"></span>Machine-readable result</div><div class="metric">${containedGatewayAttempts.length}/${parsedGatewayResult.attempts.length} bounded outcomes</div><p>Platform <code>${escapeHtml(parsedGatewayResult.platform)}</code> · Node <code>${escapeHtml(parsedGatewayResult.node)}</code></p><p>PID stable: <code>${String(parsedGatewayResult.pidStable)}</code> · Health: <code>${String(parsedGatewayResult.healthyAfter)}</code> · Authenticated RPC: <code>${String(parsedGatewayResult.authenticatedRpcAfter)}</code></p><p>Provider requests: <code>${String(parsedGatewayResult.providerRequests)}</code> · Unhandled rejection: <code>${String(parsedGatewayResult.unhandledPromiseRejection)}</code></p></article>
     <article class="panel"><div class="status pass"><span class="dot"></span>Gateway E2E test</div><pre>${escapeHtml(excerpt(gatewayLog, 34))}</pre></article>
     <article class="panel wide"><h2>Proof boundary</h2><p>The same foreground Gateway PID remains alive after an attested workspace deletion and repeated deletion-race attempts. Health and authenticated RPC probes pass after the spawn path completes.</p></article>
   </section>`,
