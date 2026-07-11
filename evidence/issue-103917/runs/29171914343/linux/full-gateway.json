@@ -1,0 +1,56 @@
+{
+  "platform": "linux",
+  "node": "v24.18.0",
+  "gatewayPid": 3237,
+  "pidStable": true,
+  "healthyAfter": true,
+  "authenticatedRpcAfter": true,
+  "attempts": [
+    {
+      "code": 0,
+      "label": "no-delete-first",
+      "outcome": "completed"
+    },
+    {
+      "code": 0,
+      "label": "no-delete-repeat",
+      "outcome": "completed"
+    },
+    {
+      "code": 1,
+      "label": "attested-delete",
+      "outcome": "scoped-workspace-error"
+    },
+    {
+      "code": 1,
+      "label": "race-1",
+      "outcome": "scoped-workspace-error"
+    },
+    {
+      "code": 1,
+      "label": "race-2",
+      "outcome": "scoped-workspace-error"
+    },
+    {
+      "code": 1,
+      "label": "race-3",
+      "outcome": "scoped-workspace-error"
+    },
+    {
+      "code": 1,
+      "label": "race-4",
+      "outcome": "scoped-workspace-error"
+    },
+    {
+      "code": 1,
+      "label": "race-5",
+      "outcome": "scoped-workspace-error"
+    }
+  ],
+  "providerRequests": 5,
+  "toolResultMessages": [
+    "{\n  \"status\": \"accepted\",\n  \"childSessionKey\": \"agent:coder:subagent:0bb0f525-b537-4a63-9a13-ab339d3b680d\",\n  \"runId\": \"e7cc3d82-f4f6-45d5-83c1-e5c624c965a5\",\n  \"mode\": \"run\",\n  \"note\": \"Auto-announce is push-based. After spawning children, do NOT call sessions_list, sessions_history, exec sleep, or any polling tool. Track expected child session keys. Continue any independent work. If your final answer depends on child output, wait for runtime completion events to arrive as user messages and only answer after completion events for ALL required children arrive. If a child completion event arrives AFTER your final answer, reply ONLY with NO_REPLY.\",\n  \"resolvedModel\": \"proof/issue-103917-model\",\n  \"resolvedProvider\": \"proof\",\n  \"modelApplied\": true\n}",
+    "{\n  \"status\": \"accepted\",\n  \"childSessionKey\": \"agent:coder:subagent:b5a426d0-932f-490c-b6e5-dc9ffe162a3e\",\n  \"runId\": \"f30b68e9-7ad6-4cfc-a029-81c82627faac\",\n  \"mode\": \"run\",\n  \"note\": \"Auto-announce is push-based. After spawning children, do NOT call sessions_list, sessions_history, exec sleep, or any polling tool. Track expected child session keys. Continue any independent work. If your final answer depends on child output, wait for runtime completion events to arrive as user messages and only answer after completion events for ALL required children arrive. If a child completion event arrives AFTER your final answer, reply ONLY with NO_REPLY.\",\n  \"resolvedModel\": \"proof/issue-103917-model\",\n  \"resolvedProvider\": \"proof\",\n  \"modelApplied\": true\n}"
+  ],
+  "unhandledPromiseRejection": false
+}

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Real Gateway containment</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0f1216; color: #e8edf2; font: 16px/1.5 ui-sans-serif, system-ui, sans-serif; letter-spacing: 0; }
+  main { width: 1440px; min-height: 900px; padding: 48px 56px; }
+  header { display: flex; align-items: end; justify-content: space-between; border-bottom: 1px solid #30363d; padding-bottom: 24px; margin-bottom: 28px; }
+  h1 { margin: 0; font-size: 34px; line-height: 1.15; }
+  h2 { margin: 0 0 12px; font-size: 20px; }
+  p { margin: 6px 0; color: #aab4be; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  code { color: #e8edf2; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .panel { border: 1px solid #30363d; border-radius: 8px; background: #171b21; padding: 22px; min-width: 0; }
+  .wide { grid-column: 1 / -1; }
+  .status { display: inline-flex; gap: 8px; align-items: center; font-weight: 700; }
+  .pass { color: #4ad66d; }
+  .fail { color: #ff6b6b; }
+  .neutral { color: #74c0fc; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: currentColor; }
+  pre { margin: 0; max-height: 410px; overflow: hidden; white-space: pre-wrap; word-break: break-word; color: #d7dee7; font-size: 14px; line-height: 1.42; }
+  .meta { font-size: 13px; text-align: right; color: #8b949e; }
+  .metric { font-size: 32px; font-weight: 750; margin: 5px 0; }
+  a { color: #74c0fc; }
+</style>
+</head>
+<body><main>
+<header><div><h1>Real Gateway containment</h1><p>Foreground Gateway process, real agent RPC, sessions_spawn, workspace deletion, and health probes</p></div><div class="meta">Issue #103917<br>2026-07-11T23:23:51Z</div></header>
+<section class="grid">
+    <article class="panel"><div class="status pass"><span class="dot"></span>Machine-readable result</div><div class="metric">8/8 bounded outcomes</div><p>Platform <code>linux</code> · Node <code>v24.18.0</code></p><p>PID stable: <code>true</code> · Health: <code>true</code> · Authenticated RPC: <code>true</code></p><p>Provider requests: <code>5</code> · Unhandled rejection: <code>false</code></p></article>
+    <article class="panel"><div class="status pass"><span class="dot"></span>Gateway E2E test</div><pre>$ node scripts/test-projects.mjs test/issue-103917.gateway-proof.e2e.test.ts
+[test] starting test/vitest/vitest.e2e.config.ts
+ RUN  v4.1.9 &lt;runner-workspace&gt;
+[vitest] still running with no output for 30000ms (test/vitest/vitest.e2e.config.ts).
+[vitest] still running with no output for 60000ms (test/vitest/vitest.e2e.config.ts).
+[vitest] still running with no output for 90000ms (test/vitest/vitest.e2e.config.ts).
+[vitest] still running with no output for 120000ms (test/vitest/vitest.e2e.config.ts).
+ ✓ test/issue-103917.gateway-proof.e2e.test.ts (1 test) 123172ms
+     ✓ keeps the same Gateway alive when coder workspace deletion reaches sessions_spawn  123168ms
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  23:21:42
+   Duration  128.56s (transform 4.00s, setup 481ms, import 4.70s, tests 123.17s, environment 0ms)
+[test] passed 1 Vitest shard in 129.12s</pre></article>
+    <article class="panel wide"><h2>Proof boundary</h2><p>The same foreground Gateway PID remains alive after an attested workspace deletion and repeated deletion-race attempts. Health and authenticated RPC probes pass after the spawn path completes.</p></article>
+  </section>
+</main></body></html>

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Workspace deletion crash: before / current head</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0f1216; color: #e8edf2; font: 16px/1.5 ui-sans-serif, system-ui, sans-serif; letter-spacing: 0; }
+  main { width: 1440px; min-height: 900px; padding: 48px 56px; }
+  header { display: flex; align-items: end; justify-content: space-between; border-bottom: 1px solid #30363d; padding-bottom: 24px; margin-bottom: 28px; }
+  h1 { margin: 0; font-size: 34px; line-height: 1.15; }
+  h2 { margin: 0 0 12px; font-size: 20px; }
+  p { margin: 6px 0; color: #aab4be; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  code { color: #e8edf2; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .panel { border: 1px solid #30363d; border-radius: 8px; background: #171b21; padding: 22px; min-width: 0; }
+  .wide { grid-column: 1 / -1; }
+  .status { display: inline-flex; gap: 8px; align-items: center; font-weight: 700; }
+  .pass { color: #4ad66d; }
+  .fail { color: #ff6b6b; }
+  .neutral { color: #74c0fc; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: currentColor; }
+  pre { margin: 0; max-height: 410px; overflow: hidden; white-space: pre-wrap; word-break: break-word; color: #d7dee7; font-size: 14px; line-height: 1.42; }
+  .meta { font-size: 13px; text-align: right; color: #8b949e; }
+  .metric { font-size: 32px; font-weight: 750; margin: 5px 0; }
+  a { color: #74c0fc; }
+</style>
+</head>
+<body><main>
+<header><div><h1>Workspace deletion crash: before / current head</h1><p>GitHub Actions real-behavior capture from the snowzlmbot/openclaw repository</p></div><div class="meta">Issue #103917<br>2026-07-11T23:23:51Z</div></header>
+<section class="grid">
+    <article class="panel"><div class="status fail"><span class="dot"></span>Affected release reproduced</div><div class="metric">v2026.6.11</div><p><code>e085fa1a3ffd32d0ea6917e1e6fb4ecbffbb77d2</code></p><p>The current lazy-root regression fails against the released eager-root implementation, as expected.</p></article>
+    <article class="panel"><div class="status pass"><span class="dot"></span>Current main passes</div><div class="metric">No orphan rejection</div><p><code>453c049ac89d8512688b300faa0f8da4b3d57935</code></p><p>Focused regression and adjacent workspace/subagent suites completed without the reported failure signature.</p></article>
+    <article class="panel wide"><h2>Owner fix already merged</h2><p><a href="https://github.com/openclaw/openclaw/pull/89226">openclaw/openclaw#89226</a> moved workspace-scoped fs-safe root resolution from tool construction to first real operation.</p><p>Commit <code>201686d9e30dbc85790f3e5c851a57e4d96d233e</code>. No duplicate product patch is introduced by this proof branch.</p></article>
+  </section>
+</main></body></html>

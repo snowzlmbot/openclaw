@@ -1,0 +1,20 @@
+{
+  "issue": "103917",
+  "runUrl": "https://github.com/snowzlmbot/openclaw/actions/runs/29171914343",
+  "baseline": {
+    "ref": "v2026.6.11",
+    "sha": "e085fa1a3ffd32d0ea6917e1e6fb4ecbffbb77d2",
+    "expectedRegression": "failed"
+  },
+  "current": {
+    "sha": "453c049ac89d8512688b300faa0f8da4b3d57935",
+    "regression": "passed",
+    "adjacentSuites": "passed"
+  },
+  "ownerFix": {
+    "commit": "201686d9e30dbc85790f3e5c851a57e4d96d233e",
+    "pullRequest": "https://github.com/openclaw/openclaw/pull/89226"
+  },
+  "failureSignatureOnCurrent": false,
+  "capturedAt": "2026-07-11T23:23:51Z"
+}
