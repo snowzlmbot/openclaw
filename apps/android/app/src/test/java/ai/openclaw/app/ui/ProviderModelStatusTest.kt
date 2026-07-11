@@ -163,8 +163,7 @@ class ProviderModelStatusTest {
       Json
         .parseToJsonElement(
           """[{"id":"video-model","name":"Video Model","provider":"openai","input":["text","video"]}]""",
-        )
-        .jsonArray
+        ).jsonArray
     val model = parseGatewayModels(payload).single()
 
     assertTrue(model.supportsVideo)
