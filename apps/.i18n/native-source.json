@@ -171,7 +171,7 @@
     },
     {
       "kind": "ui-state-text",
-      "line": 355,
+      "line": 358,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/MainViewModel.kt",
       "source": "Mic off",
       "surface": "android",
@@ -179,7 +179,7 @@
     },
     {
       "kind": "ui-state-text",
-      "line": 369,
+      "line": 372,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/MainViewModel.kt",
       "source": "Off",
       "surface": "android",
