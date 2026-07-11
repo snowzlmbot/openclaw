@@ -1,0 +1,44 @@
+{
+  "platform": "darwin",
+  "node": "v26.4.0",
+  "gatewayPid": 3324,
+  "pidStable": true,
+  "healthyAfter": true,
+  "authenticatedRpcAfter": true,
+  "attempts": [
+    {
+      "code": 0,
+      "label": "attested-delete"
+    },
+    {
+      "code": 0,
+      "label": "race-1"
+    },
+    {
+      "code": 0,
+      "label": "race-2"
+    },
+    {
+      "code": 0,
+      "label": "race-3"
+    },
+    {
+      "code": 0,
+      "label": "race-4"
+    },
+    {
+      "code": 0,
+      "label": "race-5"
+    }
+  ],
+  "providerRequests": 13,
+  "toolResultMessages": [
+    "{\n  \"status\": \"accepted\",\n  \"childSessionKey\": \"agent:coder:subagent:d46fa0d8-2851-4c47-aa41-c897ea3c1834\",\n  \"runId\": \"6b7f232e-cac8-4c0d-af56-220dc9ce4b91\",\n  \"mode\": \"run\",\n  \"note\": \"Auto-announce is push-based. After spawning children, do NOT call sessions_list, sessions_history, exec sleep, or any polling tool. Track expected child session keys. Continue any independent work. If your final answer depends on child output, wait for runtime completion events to arrive as user messages and only answer after completion events for ALL required children arrive. If a child completion event arrives AFTER your final answer, reply ONLY with NO_REPLY.\",\n  \"resolvedModel\": \"proof/issue-103917-model\",\n  \"resolvedProvider\": \"proof\",\n  \"modelApplied\": true\n}",
+    "{\n  \"status\": \"accepted\",\n  \"childSessionKey\": \"agent:coder:subagent:0937ab37-724b-4bef-80f1-795943c32532\",\n  \"runId\": \"310035df-fd7a-4108-ace6-c258f4503709\",\n  \"mode\": \"run\",\n  \"note\": \"Auto-announce is push-based. After spawning children, do NOT call sessions_list, sessions_history, exec sleep, or any polling tool. Track expected child session keys. Continue any independent work. If your final answer depends on child output, wait for runtime completion events to arrive as user messages and only answer after completion events for ALL required children arrive. If a child completion event arrives AFTER your final answer, reply ONLY with NO_REPLY.\",\n  \"resolvedModel\": \"proof/issue-103917-model\",\n  \"resolvedProvider\": \"proof\",\n  \"modelApplied\": true\n}",
+    "{\n  \"status\": \"accepted\",\n  \"childSessionKey\": \"agent:coder:subagent:c3f504aa-3c41-42d2-aa40-a3bf648ccdad\",\n  \"runId\": \"6ef4b488-cb9c-4a68-8455-462d543e2b2d\",\n  \"mode\": \"run\",\n  \"note\": \"Auto-announce is push-based. After spawning children, do NOT call sessions_list, sessions_history, exec sleep, or any polling tool. Track expected child session keys. Continue any independent work. If your final answer depends on child output, wait for runtime completion events to arrive as user messages and only answer after completion events for ALL required children arrive. If a child completion event arrives AFTER your final answer, reply ONLY with NO_REPLY.\",\n  \"resolvedModel\": \"proof/issue-103917-model\",\n  \"resolvedProvider\": \"proof\",\n  \"modelApplied\": true\n}",
+    "{\n  \"status\": \"accepted\",\n  \"childSessionKey\": \"agent:coder:subagent:023adcb2-b78c-40f7-99a2-e3e2073f0e59\",\n  \"runId\": \"dce9ea31-d289-4536-a5a6-d33ab37fc2de\",\n  \"mode\": \"run\",\n  \"note\": \"Auto-announce is push-based. After spawning children, do NOT call sessions_list, sessions_history, exec sleep, or any polling tool. Track expected child session keys. Continue any independent work. If your final answer depends on child output, wait for runtime completion events to arrive as user messages and only answer after completion events for ALL required children arrive. If a child completion event arrives AFTER your final answer, reply ONLY with NO_REPLY.\",\n  \"resolvedModel\": \"proof/issue-103917-model\",\n  \"resolvedProvider\": \"proof\",\n  \"modelApplied\": true\n}",
+    "{\n  \"status\": \"accepted\",\n  \"childSessionKey\": \"agent:coder:subagent:b5451f4d-4078-4d73-9e1e-3628f8f062c9\",\n  \"runId\": \"b1690d4c-8b5e-4e79-a1db-7c67ab754ded\",\n  \"mode\": \"run\",\n  \"note\": \"Auto-announce is push-based. After spawning children, do NOT call sessions_list, sessions_history, exec sleep, or any polling tool. Track expected child session keys. Continue any independent work. If your final answer depends on child output, wait for runtime completion events to arrive as user messages and only answer after completion events for ALL required children arrive. If a child completion event arrives AFTER your final answer, reply ONLY with NO_REPLY.\",\n  \"resolvedModel\": \"proof/issue-103917-model\",\n  \"resolvedProvider\": \"proof\",\n  \"modelApplied\": true\n}",
+    "{\n  \"status\": \"accepted\",\n  \"childSessionKey\": \"agent:coder:subagent:45ba3978-9971-4496-8a9d-aea7e4265262\",\n  \"runId\": \"a77cb8a3-691d-4bce-943f-29ab4f6070e8\",\n  \"mode\": \"run\",\n  \"note\": \"Auto-announce is push-based. After spawning children, do NOT call sessions_list, sessions_history, exec sleep, or any polling tool. Track expected child session keys. Continue any independent work. If your final answer depends on child output, wait for runtime completion events to arrive as user messages and only answer after completion events for ALL required children arrive. If a child completion event arrives AFTER your final answer, reply ONLY with NO_REPLY.\",\n  \"resolvedModel\": \"proof/issue-103917-model\",\n  \"resolvedProvider\": \"proof\",\n  \"modelApplied\": true\n}"
+  ],
+  "unhandledPromiseRejection": false
+}

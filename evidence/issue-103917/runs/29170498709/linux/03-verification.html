@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Current-head verification matrix</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0f1216; color: #e8edf2; font: 16px/1.5 ui-sans-serif, system-ui, sans-serif; letter-spacing: 0; }
+  main { width: 1440px; min-height: 900px; padding: 48px 56px; }
+  header { display: flex; align-items: end; justify-content: space-between; border-bottom: 1px solid #30363d; padding-bottom: 24px; margin-bottom: 28px; }
+  h1 { margin: 0; font-size: 34px; line-height: 1.15; }
+  h2 { margin: 0 0 12px; font-size: 20px; }
+  p { margin: 6px 0; color: #aab4be; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  code { color: #e8edf2; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .panel { border: 1px solid #30363d; border-radius: 8px; background: #171b21; padding: 22px; min-width: 0; }
+  .wide { grid-column: 1 / -1; }
+  .status { display: inline-flex; gap: 8px; align-items: center; font-weight: 700; }
+  .pass { color: #4ad66d; }
+  .fail { color: #ff6b6b; }
+  .neutral { color: #74c0fc; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: currentColor; }
+  pre { margin: 0; max-height: 410px; overflow: hidden; white-space: pre-wrap; word-break: break-word; color: #d7dee7; font-size: 14px; line-height: 1.42; }
+  .meta { font-size: 13px; text-align: right; color: #8b949e; }
+  .metric { font-size: 32px; font-weight: 750; margin: 5px 0; }
+  a { color: #74c0fc; }
+</style>
+</head>
+<body><main>
+<header><div><h1>Current-head verification matrix</h1><p>Focused regression plus adjacent workspace boundary, coding-tool, and subagent inheritance suites</p></div><div class="meta">Issue #103917<br>2026-07-11T22:32:03Z</div></header>
+<section class="grid">
+    <article class="panel"><div class="status fail"><span class="dot"></span>Before proof</div><pre>    Array [
+      &quot;/openclaw-nonexistent-workspace-zzz/does/not/exist&quot;,
+    ]
+  2nd vi.fn() call:
+    Array [
+      &quot;/openclaw-nonexistent-workspace-zzz/does/not/exist&quot;,
+    ]
+Number of calls: 2
+ ❯ src/agents/agent-tools.read.workspace-root-lazy.test.ts:107:25
+    105|     // Validation failed before the fs-safe root was started, so there…
+    106|     // rejecting promise — neither a rootSpy call nor an unhandled rej…
+    107|     expect(rootSpy).not.toHaveBeenCalled();
+       |                         ^
+    108|     expect(unhandled).toEqual([]);
+    109|   });
+------------------------[2/2]-
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  22:28:44
+   Duration  4.79s (transform 3.41s, setup 424ms, import 4.01s, tests 147ms, environment 0ms)
+::error file=&lt;runner-workspace&gt;/baseline/src/agents/agent-tools.read.workspace-root-lazy.test.ts,title=[agents] src/agents/agent-tools.read.workspace-root-lazy.test.ts &gt; workspace-scoped coding tools resolve their fs root lazily &gt; does not open the fs-safe root while only constructing the tool,line=74,column=25::AssertionError: expected &quot;vi.fn()&quot; to not be called at all, but actually been called 2 times%0A%0AReceived:%0A%0A  1st vi.fn() call:%0A%0A    Array [%0A      &quot;/openclaw-nonexistent-workspace-zzz/does/not/exist&quot;,%0A    ]%0A%0A  2nd vi.fn() call:%0A%0A    Array [%0A      &quot;/openclaw-nonexistent-workspace-zzz/does/not/exist&quot;,%0A    ]%0A%0A%0ANumber of calls: 2%0A%0A ❯ src/agents/agent-tools.read.workspace-root-lazy.test.ts:74:25%0A%0A
+::error file=&lt;runner-workspace&gt;/baseline/src/agents/agent-tools.read.workspace-root-lazy.test.ts,title=[agents] src/agents/agent-tools.read.workspace-root-lazy.test.ts &gt; workspace-scoped coding tools resolve their fs root lazily &gt; does not orphan a rejecting fs-safe root when a write/edit targets a missing root,line=107,column=25::AssertionError: expected &quot;vi.fn()&quot; to not be called at all, but actually been called 2 times%0A%0AReceived:%0A%0A  1st vi.fn() call:%0A%0A    Array [%0A      &quot;/openclaw-nonexistent-workspace-zzz/does/not/exist&quot;,%0A    ]%0A%0A  2nd vi.fn() call:%0A%0A    Array [%0A      &quot;/openclaw-nonexistent-workspace-zzz/does/not/exist&quot;,%0A    ]%0A%0A%0ANumber of calls: 2%0A%0A ❯ src/agents/agent-tools.read.workspace-root-lazy.test.ts:107:25%0A%0A
+[test] failed 1 Vitest shard in 10.98s
+[ELIFECYCLE] Test failed. See above for more details.</pre></article>
+    <article class="panel"><div class="status pass"><span class="dot"></span>Current regression</div><pre>$ node scripts/test-projects.mjs src/agents/agent-tools.read.workspace-root-lazy.test.ts
+[test] starting test/vitest/vitest.agents.config.ts
+ RUN  v4.1.9 &lt;runner-workspace&gt;
+ ✓  agents  src/agents/agent-tools.read.workspace-root-lazy.test.ts (2 tests) 76ms
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  22:28:53
+   Duration  5.67s (transform 4.03s, setup 466ms, import 4.93s, tests 76ms, environment 0ms)
+[test] passed 1 Vitest shard in 9.24s</pre></article>
+    <article class="panel wide"><div class="status neutral"><span class="dot"></span>Adjacent suites</div><pre>$ node scripts/test-projects.mjs src/agents/agent-tools.read.host-edit-access.test.ts src/agents/agent-tools.read.workspace-root-guard.test.ts src/agents/agent-tools.create-openclaw-coding-tools.test.ts src/agents/subagent-spawn.workspace.test.ts
+[test] starting test/vitest/vitest.agents.config.ts
+ RUN  v4.1.9 &lt;runner-workspace&gt;
+ ✓  agents  src/agents/agent-tools.read.workspace-root-guard.test.ts (16 tests) 3131ms
+ ✓  agents  src/agents/agent-tools.read.host-edit-access.test.ts (1 test) 10ms
+ ✓  agents  src/agents/subagent-spawn.workspace.test.ts (8 tests) 4623ms
+     ✓ uses the target agent workspace for cross-agent spawns  388ms
+ ✓  agents  src/agents/agent-tools.create-openclaw-coding-tools.test.ts (74 tests) 7209ms
+ Test Files  4 passed (4)
+      Tests  99 passed (99)
+   Start at  22:29:03
+   Duration  18.42s (transform 11.64s, setup 759ms, import 11.36s, tests 14.97s, environment 1ms)
+[test] passed 1 Vitest shard in 21.99s</pre></article>
+  </section>
+</main></body></html>
