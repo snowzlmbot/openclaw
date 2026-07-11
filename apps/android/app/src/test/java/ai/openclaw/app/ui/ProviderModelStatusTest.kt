@@ -160,7 +160,8 @@ class ProviderModelStatusTest {
   @Test
   fun videoCapabilitySurvivesGatewayParsingAndRendering() {
     val payload =
-      Json.parseToJsonElement(
+      Json
+        .parseToJsonElement(
           """[{"id":"video-model","name":"Video Model","provider":"openai","input":["text","video"]}]""",
         )
         .jsonArray

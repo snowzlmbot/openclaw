@@ -173,8 +173,7 @@ internal fun providerRows(
         modelCount = providerModels.size,
         models = providerModels,
       )
-    }
-    .sortedWith(compareBy(::providerPriority, { it.name.lowercase() }))
+    }.sortedWith(compareBy(::providerPriority, { it.name.lowercase() }))
 }
 
 private val ProviderAvailability.label: String
