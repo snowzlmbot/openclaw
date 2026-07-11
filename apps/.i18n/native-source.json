@@ -259,7 +259,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 3188,
+      "line": 3194,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "Failed: no secure gateway endpoint was detected. Enable gateway TLS or Tailscale Serve, or use a trusted private LAN address with Unencrypted selected.",
       "surface": "android",
@@ -267,7 +267,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 3190,
+      "line": 3196,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "Failed: secure endpoint reached, but TLS fingerprint verification timed out. Check Tailscale Serve or gateway TLS and retry.",
       "surface": "android",
@@ -275,7 +275,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 3192,
+      "line": 3198,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt",
       "source": "Failed: couldn't reach the secure gateway endpoint for this host.",
       "surface": "android",
@@ -2715,7 +2715,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 241,
+      "line": 240,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "Loading",
       "surface": "android",
@@ -2723,7 +2723,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 241,
+      "line": 240,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "No providers",
       "surface": "android",
@@ -2731,7 +2731,7 @@
     },
     {
       "kind": "ui-named-argument",
-      "line": 278,
+      "line": 277,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "Ready",
       "surface": "android",
@@ -2739,7 +2739,7 @@
     },
     {
       "kind": "ui-named-argument",
-      "line": 279,
+      "line": 278,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "Needs",
       "surface": "android",
@@ -2747,7 +2747,7 @@
     },
     {
       "kind": "ui-named-argument",
-      "line": 280,
+      "line": 279,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "Unknown",
       "surface": "android",
@@ -2755,7 +2755,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 283,
+      "line": 282,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "$modelCount configured models. Refresh to recheck availability.",
       "surface": "android",
@@ -2763,7 +2763,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 283,
+      "line": 282,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "Connect your Gateway to view provider readiness.",
       "surface": "android",
@@ -2771,7 +2771,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 287,
+      "line": 286,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "Refresh",
       "surface": "android",
@@ -2779,7 +2779,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 287,
+      "line": 286,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "Refreshing",
       "surface": "android",
@@ -2787,7 +2787,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 319,
+      "line": 318,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "${row.modelCount} configured models",
       "surface": "android",
@@ -2795,7 +2795,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 319,
+      "line": 318,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt",
       "source": "No configured models",
       "surface": "android",
