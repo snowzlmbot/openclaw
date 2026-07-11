@@ -1,0 +1,15 @@
+Affected release: v2026.6.11 (e085fa1a3ffd32d0ea6917e1e6fb4ecbffbb77d2)
+Current main: 454196952a559b199a9339c83959f75e500a252a
+
+Affected release eager root construction:
+src/agents/agent-tools.read.ts:1034:  const rootPromise = fsRoot(root);
+src/agents/agent-tools.read.ts:1072:  const rootPromise = fsRoot(root);
+
+Current main lazy root construction:
+454196952a559b199a9339c83959f75e500a252a:src/agents/agent-tools.read.ts:1038:  const getRoot = () => (rootPromise ??= fsRoot(root));
+454196952a559b199a9339c83959f75e500a252a:src/agents/agent-tools.read.ts:1080:  const getRoot = () => (rootPromise ??= fsRoot(root));
+
+Merged owner fix:
+201686d9e30dbc85790f3e5c851a57e4d96d233e
+2026-06-28T13:26:21-07:00
+fix(agent-tools): resolve workspace-scoped tool fs root lazily (#89226)
