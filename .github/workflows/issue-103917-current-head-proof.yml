@@ -215,6 +215,7 @@ jobs:
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
         with:
+          node-version: "26.4.0"
           install-bun: "false"
 
       - name: Verify macOS Gateway and sessions_spawn containment
