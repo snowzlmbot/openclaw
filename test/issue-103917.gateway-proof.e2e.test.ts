@@ -119,6 +119,19 @@ describe("issue 103917 real Gateway containment", () => {
       expect(warmup.code, warmup.stderr).toBe(0);
       expect(warmup.stdout).toContain("coder warmup complete");
 
+      for (const label of ["NO_DELETE_FIRST", "NO_DELETE_REPEAT"]) {
+        const result = await runSpawnAttempt(instance, label);
+        attempts.push({
+          code: result.code,
+          label: label.toLowerCase().replaceAll("_", "-"),
+        });
+        expect(result.code, result.stderr).toBe(0);
+        await delay(250);
+        expect(instance.child?.pid).toBe(gatewayPid);
+        expect(instance.child?.exitCode).toBeNull();
+        expect(await health(instance.port)).toBe(true);
+      }
+
       await fs.rm(coderWorkspace, { force: true, recursive: true });
       const attested = await runSpawnAttempt(instance, "ATTESTED_DELETE");
       attempts.push({ code: attested.code, label: "attested-delete" });
