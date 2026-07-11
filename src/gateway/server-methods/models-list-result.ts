@@ -17,6 +17,7 @@ import {
 } from "../../agents/model-auth-availability.js";
 import { hasSyntheticLocalProviderAuthConfig } from "../../agents/model-auth.js";
 import {
+  buildProviderConfigModelCatalogForBrowse,
   loadModelCatalogSnapshotForBrowse,
   type ModelCatalogBrowseView,
 } from "../../agents/model-catalog-browse.js";
@@ -41,6 +42,7 @@ import {
   openAIModelCatalogRoutePolicy,
 } from "../../agents/openai-model-routes.js";
 import { resolveDefaultAgentWorkspaceDir } from "../../agents/workspace.js";
+import { getRuntimeConfigSourceSnapshot } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { loadPluginRegistrySnapshotWithMetadata } from "../../plugins/plugin-registry.js";
 import type { GatewayRequestContext } from "./types.js";
@@ -48,7 +50,7 @@ import type { GatewayRequestContext } from "./types.js";
 type ModelsListView = ModelCatalogBrowseView;
 type ModelsListEntry = Pick<
   ModelCatalogEntry,
-  "alias" | "contextWindow" | "id" | "name" | "provider" | "reasoning"
+  "alias" | "contextWindow" | "id" | "input" | "name" | "provider" | "reasoning"
 > & { available?: boolean };
 type ModelsListAvailability = ModelAuthAvailability;
 type ModelsListEntryEvaluation = ModelAuthAvailabilityEvaluation;
@@ -314,6 +316,8 @@ async function buildPublicModelsListEntries(params: {
   catalog: ModelCatalogEntry[];
   cfg: OpenClawConfig;
   evaluateEntry(entry: ModelCatalogEntry): Promise<ModelsListEntryEvaluation>;
+  includeInput?: boolean;
+  preserveUnknownAvailability?: boolean;
 }): Promise<ModelsListEntry[]> {
   return await Promise.all(
     params.catalog.map(async (entry): Promise<ModelsListEntry> => {
@@ -324,11 +328,15 @@ async function buildPublicModelsListEntries(params: {
         evaluation.routeResolution === null &&
         normalizeProviderId(entry.provider) !== "openai" &&
         hasSyntheticLocalProviderAuthConfig({ cfg: params.cfg, provider: entry.provider });
-      // Optionality remains for older Gateway compatibility. Current producers
-      // emit a boolean because existing clients treat omission as selectable.
+      const available = evaluation.availability ?? (syntheticLocalAvailable ? true : undefined);
+      // Legacy views keep emitting a boolean because existing clients treat
+      // omission as selectable. Inventory consumers preserve unknown state.
       return {
         ...publicEntry,
-        available: evaluation.availability ?? syntheticLocalAvailable,
+        ...(params.includeInput && entry.input?.length ? { input: entry.input } : {}),
+        ...(params.preserveUnknownAvailability && available === undefined
+          ? {}
+          : { available: available ?? false }),
       };
     }),
   );
@@ -368,6 +376,31 @@ export async function buildModelsListResult(params: {
   });
   const catalog = snapshot.entries;
   const routeVariants = snapshot.routeVariants;
+  if (view === "provider-config") {
+    const sourceConfig = getRuntimeConfigSourceSnapshot() ?? cfg;
+    const inventorySnapshot = {
+      entries: buildProviderConfigModelCatalogForBrowse({ cfg: sourceConfig, workspaceDir }),
+      routeVariants,
+    };
+    const inventoryProjector = createGatewayAgentModelCatalogProjector({
+      cfg,
+      agentId,
+      snapshot: inventorySnapshot,
+      ...(params.routeResolverFactory
+        ? { routeResolverFactory: params.routeResolverFactory }
+        : {}),
+    });
+    const inventory = await inventoryProjector.projectCatalog();
+    return {
+      models: await buildPublicModelsListEntries({
+        catalog: inventory,
+        cfg,
+        evaluateEntry: inventoryProjector.evaluateEntry,
+        includeInput: true,
+        preserveUnknownAvailability: true,
+      }),
+    };
+  }
   const defaultModel = resolveAgentEffectiveModelPrimary(cfg, agentId);
   const visibilityPolicy = createModelVisibilityPolicy({
     cfg,

@@ -87,6 +87,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -716,6 +717,12 @@ class NodeRuntime private constructor(
   val seamColorArgb: StateFlow<Long> = _seamColorArgb.asStateFlow()
   private val _modelCatalog = MutableStateFlow<List<GatewayModelSummary>>(emptyList())
   val modelCatalog: StateFlow<List<GatewayModelSummary>> = _modelCatalog.asStateFlow()
+  private val _providerModelCatalog = MutableStateFlow<List<GatewayModelSummary>>(emptyList())
+  val providerModelCatalog: StateFlow<List<GatewayModelSummary>> = _providerModelCatalog.asStateFlow()
+  private val _providerModelCatalogRefreshing = MutableStateFlow(false)
+  val providerModelCatalogRefreshing: StateFlow<Boolean> = _providerModelCatalogRefreshing.asStateFlow()
+  private val _providerModelCatalogErrorText = MutableStateFlow<String?>(null)
+  val providerModelCatalogErrorText: StateFlow<String?> = _providerModelCatalogErrorText.asStateFlow()
   private val _modelAuthProviders = MutableStateFlow<List<GatewayModelProviderSummary>>(emptyList())
   val modelAuthProviders: StateFlow<List<GatewayModelProviderSummary>> = _modelAuthProviders.asStateFlow()
   private val _modelCatalogRefreshing = MutableStateFlow(false)
@@ -918,6 +925,9 @@ class NodeRuntime private constructor(
     _gatewayAgents.value = emptyList()
     selectedChatAgentId = null
     _modelCatalog.value = emptyList()
+    _providerModelCatalog.value = emptyList()
+    _providerModelCatalogRefreshing.value = false
+    _providerModelCatalogErrorText.value = null
     _modelAuthProviders.value = emptyList()
     _modelCatalogRefreshing.value = false
     _modelCatalogErrorText.value = null
@@ -1413,6 +1423,7 @@ class NodeRuntime private constructor(
       refreshBrandingFromGateway()
       refreshAgentsFromGateway()
       refreshModelCatalogFromGateway()
+      refreshProviderModelsFromGateway()
       refreshTalkSetupReadinessFromGateway()
       refreshCronFromGateway()
       refreshUsageFromGateway()
@@ -1428,6 +1439,13 @@ class NodeRuntime private constructor(
     if (mode == NodeRuntimeMode.ScreenshotFixture) return
     scope.launch {
       refreshModelCatalogFromGateway()
+    }
+  }
+
+  fun refreshProviderModels() {
+    if (mode == NodeRuntimeMode.ScreenshotFixture) return
+    scope.launch {
+      refreshProviderModelsFromGateway()
     }
   }
 
@@ -1921,6 +1939,7 @@ class NodeRuntime private constructor(
     _gatewayDefaultAgentId.value = "main"
     _gatewayAgents.value = AndroidScreenshotFixture.agents
     _modelCatalog.value = AndroidScreenshotFixture.models
+    _providerModelCatalog.value = AndroidScreenshotFixture.models
     _modelAuthProviders.value = AndroidScreenshotFixture.providers
     _talkSetupReadiness.value =
       GatewayTalkSetupReadiness(
@@ -3821,18 +3840,61 @@ class NodeRuntime private constructor(
       val modelsRes = requestGatewayData(gatewayScope, "models.list", "{}")
       val modelsRoot = json.parseToJsonElement(modelsRes).asObjectOrNull()
       val models = parseGatewayModels(modelsRoot?.get("models") as? JsonArray)
-      val authRes = requestGatewayData(gatewayScope, "models.authStatus", "{}")
-      val authRoot = json.parseToJsonElement(authRes).asObjectOrNull()
-      val providers = parseGatewayModelProviders(authRoot?.get("providers") as? JsonArray)
       publishGatewayData(gatewayScope) {
         _modelCatalog.value = models
-        _modelAuthProviders.value = providers
       }
     } catch (_: Throwable) {
       publishGatewayData(gatewayScope) { _modelCatalogErrorText.value = "Could not load provider catalog." }
     } finally {
       publishGatewayData(gatewayScope) { _modelCatalogRefreshing.value = false }
     }
+  }
+
+  private suspend fun refreshProviderModelsFromGateway() {
+    val gatewayScope = captureGatewayDataScope() ?: return
+    publishGatewayData(gatewayScope) {
+      _providerModelCatalogRefreshing.value = true
+      _providerModelCatalogErrorText.value = null
+    }
+    if (!operatorConnected) {
+      _providerModelCatalog.value = emptyList()
+      _modelAuthProviders.value = emptyList()
+      _providerModelCatalogRefreshing.value = false
+      return
+    }
+    try {
+      val (models, providers) =
+        coroutineScope {
+          val models = async { requestProviderModelCatalog(gatewayScope) }
+          val providers = async { requestModelAuthProviders(gatewayScope) }
+          models.await() to providers.await()
+        }
+      publishGatewayData(gatewayScope) {
+        _providerModelCatalog.value = models
+        _modelAuthProviders.value = providers
+      }
+    } catch (_: Throwable) {
+      publishGatewayData(gatewayScope) {
+        _providerModelCatalogErrorText.value = "Could not load provider model config."
+      }
+    } finally {
+      publishGatewayData(gatewayScope) { _providerModelCatalogRefreshing.value = false }
+    }
+  }
+
+  private suspend fun requestProviderModelCatalog(gatewayScope: GatewayDataScope): List<GatewayModelSummary> {
+    val modelsRes =
+      requestProviderModelConfig { paramsJson ->
+        requestGatewayData(gatewayScope, "models.list", paramsJson)
+      }
+    val modelsRoot = json.parseToJsonElement(modelsRes).asObjectOrNull()
+    return parseGatewayModels(modelsRoot?.get("models") as? JsonArray)
+  }
+
+  private suspend fun requestModelAuthProviders(gatewayScope: GatewayDataScope): List<GatewayModelProviderSummary> {
+    val authRes = requestGatewayData(gatewayScope, "models.authStatus", "{}")
+    val authRoot = json.parseToJsonElement(authRes).asObjectOrNull()
+    return parseGatewayModelProviders(authRoot?.get("providers") as? JsonArray)
   }
 
   private suspend fun refreshTalkSetupReadinessFromGateway() {
@@ -5640,6 +5702,7 @@ data class GatewayModelSummary(
   val available: Boolean?,
   val supportsVision: Boolean,
   val supportsAudio: Boolean,
+  val supportsVideo: Boolean,
   val supportsDocuments: Boolean,
   val supportsReasoning: Boolean,
   val contextTokens: Long?,
@@ -5660,11 +5723,22 @@ internal fun parseGatewayModels(models: JsonArray?): List<GatewayModelSummary> =
         available = obj.optionalBoolean("available"),
         supportsVision = "image" in inputTypes,
         supportsAudio = "audio" in inputTypes,
+        supportsVideo = "video" in inputTypes,
         supportsDocuments = "document" in inputTypes,
         supportsReasoning = obj["reasoning"].toString().trim() == "true",
         contextTokens = obj["contextWindow"].toString().toLongOrNull() ?: obj["contextTokens"].toString().toLongOrNull(),
       )
     }.orEmpty()
+
+internal suspend fun requestProviderModelConfig(request: suspend (String) -> String): String =
+  try {
+    request("""{"view":"provider-config"}""")
+  } catch (err: GatewayRequestRejected) {
+    if (err.gatewayError.code != "INVALID_REQUEST") throw err
+    // Released Gateways without the inventory view still provide the closest
+    // read-only catalog through the configured picker contract.
+    request("""{"view":"configured"}""")
+  }
 
 data class GatewayModelProviderSummary(
   val id: String,
