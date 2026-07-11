@@ -1,0 +1,274 @@
+name: Issue 103917 Current Head Proof
+
+on:
+  push:
+    branches:
+      - evidence/issue-103917-current-main
+    paths:
+      - .github/workflows/issue-103917-current-head-proof.yml
+      - scripts/issue-103917-proof/**
+      - evidence/issue-103917/README.md
+  workflow_dispatch:
+    inputs:
+      upstream_sha:
+        description: Exact openclaw/openclaw main SHA under test
+        required: true
+        type: string
+      baseline_ref:
+        description: Affected release ref used for before/after proof
+        required: true
+        default: v2026.6.11
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: issue-103917-current-head-proof-${{ inputs.upstream_sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PNPM_CONFIG_STORE_DIR: /tmp/openclaw-pnpm-store
+  PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: "false"
+  PROOF_DIR: .artifacts/issue-103917
+
+jobs:
+  compare-and-capture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout proof branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Verify exact upstream source
+        env:
+          UPSTREAM_SHA_INPUT: ${{ inputs.upstream_sha }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${UPSTREAM_SHA_INPUT}" ]]; then
+            resolved_upstream_sha="${UPSTREAM_SHA_INPUT}"
+            git fetch --no-tags https://github.com/openclaw/openclaw.git "${resolved_upstream_sha}"
+            test "$(git rev-parse FETCH_HEAD)" = "${resolved_upstream_sha}"
+          else
+            git fetch --no-tags https://github.com/openclaw/openclaw.git main
+            resolved_upstream_sha="$(git merge-base HEAD FETCH_HEAD)"
+          fi
+          git cat-file -e "${resolved_upstream_sha}^{commit}"
+          echo "RESOLVED_UPSTREAM_SHA=${resolved_upstream_sha}" >>"${GITHUB_ENV}"
+          unexpected="$({ git diff --name-only "${resolved_upstream_sha}"...HEAD || true; } | grep -Ev '^(.github/workflows/issue-103917-current-head-proof.yml|scripts/issue-103917-proof/|test/issue-103917.gateway-proof.e2e.test.ts|evidence/issue-103917/)' || true)"
+          if [[ -n "${unexpected}" ]]; then
+            echo "Proof branch changes product files relative to the requested upstream SHA:"
+            echo "${unexpected}"
+            exit 1
+          fi
+
+      - name: Setup current-head Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          install-bun: "false"
+
+      - name: Checkout affected release
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: openclaw/openclaw
+          ref: ${{ inputs.baseline_ref || 'v2026.6.11' }}
+          path: baseline
+          fetch-depth: 1
+
+      - name: Install affected-release dependencies
+        working-directory: baseline
+        run: pnpm install --frozen-lockfile
+
+      - name: Capture affected-release failure
+        env:
+          BASELINE_REF: ${{ inputs.baseline_ref || 'v2026.6.11' }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${PROOF_DIR}"
+          cp src/agents/agent-tools.read.workspace-root-lazy.test.ts \
+            baseline/src/agents/agent-tools.read.workspace-root-lazy.test.ts
+          set +e
+          (
+            cd baseline
+            pnpm test src/agents/agent-tools.read.workspace-root-lazy.test.ts
+          ) >"${PROOF_DIR}/baseline-regression.log" 2>&1
+          status=$?
+          set -e
+          echo "${status}" >"${PROOF_DIR}/baseline-exit-code.txt"
+          if [[ "${status}" -eq 0 ]]; then
+            echo "Expected ${BASELINE_REF} to fail the current lazy-root regression."
+            cat "${PROOF_DIR}/baseline-regression.log"
+            exit 1
+          fi
+          grep -Eiq 'root dir not found|not to be called|unhandled|called [1-9]' \
+            "${PROOF_DIR}/baseline-regression.log"
+
+      - name: Verify current-head regression and adjacent behavior
+        run: |
+          set -euo pipefail
+          pnpm test src/agents/agent-tools.read.workspace-root-lazy.test.ts \
+            >"${PROOF_DIR}/current-regression.log" 2>&1
+          pnpm test \
+            src/agents/agent-tools.read.host-edit-access.test.ts \
+            src/agents/agent-tools.read.workspace-root-guard.test.ts \
+            src/agents/agent-tools.create-openclaw-coding-tools.test.ts \
+            src/agents/subagent-spawn.workspace.test.ts \
+            >"${PROOF_DIR}/current-adjacent.log" 2>&1
+          if grep -Eiq 'Unhandled promise rejection|root dir not found' \
+            "${PROOF_DIR}/current-regression.log" "${PROOF_DIR}/current-adjacent.log"; then
+            echo "Current-head logs contain the failure signature."
+            exit 1
+          fi
+
+      - name: Verify real Gateway and sessions_spawn containment
+        env:
+          ISSUE103917_PROOF_DIR: ${{ env.PROOF_DIR }}
+        run: |
+          set -euo pipefail
+          pnpm test test/issue-103917.gateway-proof.e2e.test.ts \
+            >"${PROOF_DIR}/current-gateway-e2e.log" 2>&1
+
+      - name: Capture source and commit provenance
+        env:
+          BASELINE_REF: ${{ inputs.baseline_ref || 'v2026.6.11' }}
+        run: |
+          set -euo pipefail
+          baseline_sha="$(git -C baseline rev-parse HEAD)"
+          current_sha="$(git rev-parse "${RESOLVED_UPSTREAM_SHA}")"
+          {
+            echo "Affected release: ${BASELINE_REF} (${baseline_sha})"
+            echo "Current main: ${current_sha}"
+            echo
+            echo "Affected release eager root construction:"
+            git -C baseline grep -n 'const rootPromise = fsRoot(root)' -- src/agents/agent-tools.read.ts
+            echo
+            echo "Current main lazy root construction:"
+            git grep -n 'const getRoot = () => (rootPromise ??= fsRoot(root))' \
+              "${RESOLVED_UPSTREAM_SHA}" -- src/agents/agent-tools.read.ts
+            echo
+            echo "Merged owner fix:"
+            git show -s --format='%H%n%cI%n%s' 201686d9e30dbc85790f3e5c851a57e4d96d233e
+          } >"${PROOF_DIR}/source-provenance.txt"
+          jq -n \
+            --arg issue "103917" \
+            --arg runUrl "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg baselineRef "${BASELINE_REF}" \
+            --arg baselineSha "${baseline_sha}" \
+            --arg upstreamSha "${current_sha}" \
+            --arg fixCommit "201686d9e30dbc85790f3e5c851a57e4d96d233e" \
+            --arg fixPr "https://github.com/openclaw/openclaw/pull/89226" \
+            --arg capturedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{
+              issue: $issue,
+              runUrl: $runUrl,
+              baseline: { ref: $baselineRef, sha: $baselineSha, expectedRegression: "failed" },
+              current: { sha: $upstreamSha, regression: "passed", adjacentSuites: "passed" },
+              ownerFix: { commit: $fixCommit, pullRequest: $fixPr },
+              failureSignatureOnCurrent: false,
+              capturedAt: $capturedAt
+            }' >"${PROOF_DIR}/summary.json"
+
+      - name: Capture browser-rendered media
+        run: |
+          set -euo pipefail
+          node scripts/ensure-playwright-chromium.mjs
+          node --import tsx scripts/issue-103917-proof/capture-media.ts "${PROOF_DIR}"
+
+      - name: Upload immutable run artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: issue-103917-current-head-proof-${{ github.run_id }}
+          path: ${{ env.PROOF_DIR }}
+          if-no-files-found: error
+          retention-days: 90
+
+  macos-gateway-containment:
+    runs-on: macos-14
+    timeout-minutes: 35
+    steps:
+      - name: Checkout proof branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Verify exact upstream source
+        env:
+          UPSTREAM_SHA_INPUT: ${{ inputs.upstream_sha }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${UPSTREAM_SHA_INPUT}" ]]; then
+            resolved_upstream_sha="${UPSTREAM_SHA_INPUT}"
+            git fetch --no-tags https://github.com/openclaw/openclaw.git "${resolved_upstream_sha}"
+            test "$(git rev-parse FETCH_HEAD)" = "${resolved_upstream_sha}"
+          else
+            git fetch --no-tags https://github.com/openclaw/openclaw.git main
+            resolved_upstream_sha="$(git merge-base HEAD FETCH_HEAD)"
+          fi
+          git cat-file -e "${resolved_upstream_sha}^{commit}"
+          unexpected="$({ git diff --name-only "${resolved_upstream_sha}"...HEAD || true; } | grep -Ev '^(.github/workflows/issue-103917-current-head-proof.yml|scripts/issue-103917-proof/|test/issue-103917.gateway-proof.e2e.test.ts|evidence/issue-103917/)' || true)"
+          test -z "${unexpected}"
+
+      - name: Setup Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          install-bun: "false"
+
+      - name: Verify macOS Gateway and sessions_spawn containment
+        env:
+          ISSUE103917_PROOF_DIR: .artifacts/issue-103917-macos
+        run: |
+          set -euo pipefail
+          mkdir -p "${ISSUE103917_PROOF_DIR}"
+          pnpm test test/issue-103917.gateway-proof.e2e.test.ts \
+            >"${ISSUE103917_PROOF_DIR}/current-gateway-e2e.log" 2>&1
+
+      - name: Upload macOS real-behavior proof
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: issue-103917-macos-gateway-proof-${{ github.run_id }}
+          path: .artifacts/issue-103917-macos
+          if-no-files-found: error
+          retention-days: 90
+
+  publish-proof:
+    needs:
+      - compare-and-capture
+      - macos-gateway-containment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout proof branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Download Linux proof artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: issue-103917-current-head-proof-${{ github.run_id }}
+          path: .artifacts/issue-103917
+
+      - name: Download macOS proof artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: issue-103917-macos-gateway-proof-${{ github.run_id }}
+          path: .artifacts/issue-103917-macos
+
+      - name: Publish successful proof media
+        env:
+          PUBLISH_DIR: evidence/issue-103917/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${PUBLISH_DIR}/linux" "${PUBLISH_DIR}/macos"
+          cp -a .artifacts/issue-103917/. "${PUBLISH_DIR}/linux/"
+          cp -a .artifacts/issue-103917-macos/. "${PUBLISH_DIR}/macos/"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "${PUBLISH_DIR}"
+          git commit -m "proof(issue-103917): publish current-head evidence run ${GITHUB_RUN_ID}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
