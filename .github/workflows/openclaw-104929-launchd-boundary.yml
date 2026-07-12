@@ -89,6 +89,7 @@ jobs:
       - name: Run service-managed ownership proof
         working-directory: candidate
         run: |
+          mkdir -p scripts/proof
           cp ../scripts/proof/openclaw-104929-service-worker.mts scripts/proof/
           python3 ../scripts/proof/openclaw-104929-service-proof.py \
             . \
