@@ -76,33 +76,9 @@ function parseJsonRecord(value: string): Record<string, unknown> | undefined {
   return asOptionalRecord(safeParseJson(value));
 }
 
-function deliveryEnvelopeConfirmsCurrentSourceRoute(value: unknown, depth = 0): boolean {
-  if (!value || typeof value !== "object" || depth > 4) {
-    return false;
-  }
-  if (Array.isArray(value)) {
-    return value.some((item) => deliveryEnvelopeConfirmsCurrentSourceRoute(item, depth + 1));
-  }
-  const record = value as Record<string, unknown>;
-  if (record.sourceReplyRoute === CURRENT_SOURCE_REPLY_ROUTE) {
-    return true;
-  }
-  if (typeof record.text === "string") {
-    const parsed = parseJsonRecord(record.text);
-    if (parsed && deliveryEnvelopeConfirmsCurrentSourceRoute(parsed, depth + 1)) {
-      return true;
-    }
-  }
-  const content = record.content;
-  if (
-    Array.isArray(content) &&
-    content.some((item) => deliveryEnvelopeConfirmsCurrentSourceRoute(item, depth + 1))
-  ) {
-    return true;
-  }
-  return RESULT_ENVELOPE_KEYS.some((key) =>
-    deliveryEnvelopeConfirmsCurrentSourceRoute(record[key], depth + 1),
-  );
+function resultConfirmsCurrentSourceRoute(value: unknown): boolean {
+  const details = asRecord(asRecord(value).details);
+  return details.sourceReplyRoute === CURRENT_SOURCE_REPLY_ROUTE;
 }
 
 function recordHasDeliveredMessageId(record: Record<string, unknown>): boolean {
@@ -594,9 +570,7 @@ export function isDeliveredMessageToolOnlySourceReplyResult(params: {
     return false;
   }
   const hasConfirmedExplicitSourceRoute =
-    params.allowExplicitSourceRoute === true ||
-    deliveryEnvelopeConfirmsCurrentSourceRoute(params.result) ||
-    deliveryEnvelopeConfirmsCurrentSourceRoute(params.hookResult);
+    params.allowExplicitSourceRoute === true || resultConfirmsCurrentSourceRoute(params.result);
   if (hasExplicitMessageRoute(args) && !hasConfirmedExplicitSourceRoute) {
     return false;
   }

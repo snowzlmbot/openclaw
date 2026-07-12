@@ -1463,6 +1463,52 @@ describe("gateway server chat", () => {
     );
   });
 
+  test("chat.history does not mirror suppressed current-source sends", async () => {
+    const historyMessages = await loadChatHistoryWithMessages([
+      {
+        role: "user",
+        content: [{ type: "text", text: "reply here" }],
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "call-message-suppressed-current-source",
+            name: "message",
+            arguments: {
+              action: "send",
+              target: "8455538490",
+              message: "Must not appear",
+            },
+          },
+        ],
+        timestamp: 2,
+      },
+      {
+        role: "toolResult",
+        toolName: "message",
+        toolCallId: "call-message-suppressed-current-source",
+        content: { ok: true, messageId: "suppressed" },
+        details: {
+          ok: true,
+          messageId: "suppressed",
+          deliveryStatus: "suppressed",
+          sourceReplyRoute: "current-source",
+        },
+        timestamp: 3,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "NO_REPLY" }],
+        timestamp: 4,
+      },
+    ]);
+
+    expect(collectHistoryTextValues(historyMessages)).toEqual(["reply here"]);
+  });
+
   test("chat.history does not mirror message tool sends from unmatched results", async () => {
     const historyMessages = await loadChatHistoryWithMessages([
       {

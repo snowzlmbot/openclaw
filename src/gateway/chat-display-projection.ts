@@ -1005,6 +1005,39 @@ function hasDryRunToolResultValue(value: unknown): boolean {
   });
 }
 
+function hasSuppressedToolResultValue(value: unknown): boolean {
+  const record = readMaybeJsonRecord(value);
+  if (record) {
+    const messageId = normalizeOptionalString(record.messageId)?.toLowerCase();
+    const status =
+      normalizeOptionalString(record.deliveryStatus)?.toLowerCase() ??
+      normalizeOptionalString(record.delivery_status)?.toLowerCase() ??
+      normalizeOptionalString(record.status)?.toLowerCase();
+    if (
+      record.delivered === false ||
+      messageId === "skipped" ||
+      messageId === "suppressed" ||
+      status === "skipped" ||
+      status === "suppressed"
+    ) {
+      return true;
+    }
+  }
+  if (!Array.isArray(value)) {
+    return false;
+  }
+  return value.some((block) => {
+    if (hasSuppressedToolResultValue(block)) {
+      return true;
+    }
+    const blockRecord = readRecord(block);
+    return (
+      hasSuppressedToolResultValue(blockRecord?.text) ||
+      hasSuppressedToolResultValue(blockRecord?.content)
+    );
+  });
+}
+
 function isSuccessfulMessageToolResult(
   message: Record<string, unknown>,
   pending: PendingMessageToolVisibleReply,
@@ -1040,6 +1073,15 @@ function isSuccessfulMessageToolResultPayload(message: Record<string, unknown>):
   ) {
     return false;
   }
+  if (
+    hasSuppressedToolResultValue(message.details) ||
+    hasSuppressedToolResultValue(message.result) ||
+    hasSuppressedToolResultValue(message.output) ||
+    hasSuppressedToolResultValue(message.content) ||
+    hasSuppressedToolResultValue(message.text)
+  ) {
+    return false;
+  }
   const ok =
     readToolResultOkValue(message.result) ??
     readToolResultOkValue(message.output) ??
@@ -1058,27 +1100,8 @@ function readMessageToolSourceReplySink(
 function readMessageToolSourceReplyRoute(
   message: Record<string, unknown>,
 ): "current-source" | undefined {
-  const values = [message.details, message.result, message.output, message.content, message.text];
-  for (const value of values) {
-    const record = readMaybeJsonRecord(value);
-    if (record?.sourceReplyRoute === "current-source") {
-      return "current-source";
-    }
-    if (!Array.isArray(value)) {
-      continue;
-    }
-    for (const block of value) {
-      const blockRecord = readRecord(block);
-      if (blockRecord?.sourceReplyRoute === "current-source") {
-        return "current-source";
-      }
-      const textRecord = readMaybeJsonRecord(blockRecord?.text);
-      if (textRecord?.sourceReplyRoute === "current-source") {
-        return "current-source";
-      }
-    }
-  }
-  return undefined;
+  const details = readRecord(message.details);
+  return details?.sourceReplyRoute === "current-source" ? "current-source" : undefined;
 }
 
 function buildMessageToolVisibleReplyMirror(

@@ -733,7 +733,9 @@ function hasExplicitNonCurrentAccountParam(
   if (!explicitAccountId) {
     return false;
   }
-  const currentAccountId = normalizeOptionalString(input.requesterAccountId);
+  const currentAccountId = normalizeOptionalString(
+    input.requesterAccountId ?? input.defaultAccountId,
+  );
   return (
     !currentAccountId ||
     normalizeAccountId(explicitAccountId) !== normalizeAccountId(currentAccountId)
@@ -750,6 +752,9 @@ function applyImplicitSourceReplySendPolicy(
   if (hasExplicitNonCurrentChannelParam(input, params)) {
     return;
   }
+  if (hasExplicitNonCurrentAccountParam(input, params)) {
+    return;
+  }
   if (hasExplicitTargetParam(params) && !isCurrentSourceTargetParam(input, params)) {
     return;
   }
@@ -759,6 +764,7 @@ function applyImplicitSourceReplySendPolicy(
 function isCurrentSourceReplySend(params: {
   input: RunMessageActionParams;
   actionParams: Record<string, unknown>;
+  replyToIsExplicit: boolean;
   resolvedThreadId?: string;
 }): boolean {
   if (
@@ -771,6 +777,9 @@ function isCurrentSourceReplySend(params: {
   }
   const currentThreadId = normalizeOptionalString(params.input.toolContext?.currentThreadTs);
   const resolvedThreadId = normalizeOptionalString(params.resolvedThreadId);
+  if (params.replyToIsExplicit && params.actionParams.channel === "slack" && !currentThreadId) {
+    return false;
+  }
   return currentThreadId ? resolvedThreadId === currentThreadId : !resolvedThreadId;
 }
 
@@ -1344,7 +1353,12 @@ async function handleSendAction(ctx: ResolvedActionContext): Promise<MessageActi
     }),
   });
   if (gatewayPluginAction) {
-    return isCurrentSourceReplySend({ input, actionParams: params, resolvedThreadId })
+    return isCurrentSourceReplySend({
+      input,
+      actionParams: params,
+      replyToIsExplicit,
+      resolvedThreadId,
+    })
       ? markCurrentSourceReplyResult(gatewayPluginAction)
       : gatewayPluginAction;
   }
@@ -1432,7 +1446,12 @@ async function handleSendAction(ctx: ResolvedActionContext): Promise<MessageActi
     sendResult: send.sendResult,
     dryRun,
   };
-  return isCurrentSourceReplySend({ input, actionParams: params, resolvedThreadId })
+  return isCurrentSourceReplySend({
+    input,
+    actionParams: params,
+    replyToIsExplicit,
+    resolvedThreadId,
+  })
     ? markCurrentSourceReplyResult(result)
     : result;
 }
@@ -1689,7 +1708,6 @@ export async function runMessageAction(
   if (await shouldUseInternalSourceReplySink(input, params)) {
     return handleInternalSourceReplySendAction({ ...input, agentId: resolvedAgentId }, params);
   }
-  applyImplicitSourceReplySendPolicy(input, params);
   // Missing targets must fail before channel discovery, which can bootstrap or
   // probe configured plugins. Non-standard params may still be owner aliases.
   if (actionRequiresTarget(action) && !hasPotentialActionTargetInput(input, params)) {
@@ -1724,6 +1742,7 @@ export async function runMessageAction(
   if (accountId) {
     params.accountId = accountId;
   }
+  applyImplicitSourceReplySendPolicy(input, params);
   const dryRun = Boolean(input.dryRun ?? readBooleanParam(params, "dryRun"));
   const normalizationPolicy = resolveAttachmentMediaPolicy({
     sandboxRoot: input.sandboxRoot,
