@@ -37,6 +37,11 @@ jobs:
     env:
       CANDIDATE_SHA: "457208666c72cd58b3fa6a39195de3f9c98dfa3c"
     steps:
+      - name: Checkout evidence harness
+        uses: actions/checkout@v4
+        with:
+          path: evidence
+
       - name: Checkout exact candidate
         uses: actions/checkout@v4
         with:
@@ -90,8 +95,8 @@ jobs:
         working-directory: candidate
         run: |
           mkdir -p scripts/proof
-          cp ../scripts/proof/openclaw-104929-service-worker.mts scripts/proof/
-          python3 ../scripts/proof/openclaw-104929-service-proof.py \
+          cp ../evidence/scripts/proof/openclaw-104929-service-worker.mts scripts/proof/
+          python3 ../evidence/scripts/proof/openclaw-104929-service-proof.py \
             . \
             ../proof-artifacts/openclaw-104929-candidate \
             | tee ../proof-artifacts/openclaw-104929-candidate/service-proof.log
