@@ -80,8 +80,11 @@ jobs:
           node scripts/run-vitest.mjs run \
             --config test/vitest/vitest.unit.config.ts \
             src/acp/control-plane/manager.cancel-session.test.ts \
-            src/auto-reply/reply/abort.test.ts \
             | tee ../proof-artifacts/openclaw-104929-candidate/control-plane.log
+          node scripts/run-vitest.mjs run \
+            --config test/vitest/vitest.auto-reply-reply.config.ts \
+            src/auto-reply/reply/abort.test.ts \
+            | tee ../proof-artifacts/openclaw-104929-candidate/abort-feedback.log
 
       - name: Upload candidate proof logs
         if: always()
