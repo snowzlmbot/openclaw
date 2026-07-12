@@ -1,4 +1,5 @@
 // Session file method tests cover transcript-linked files plus the workspace browser.
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -45,7 +46,7 @@ function createResponder() {
   };
 }
 
-type SessionFilesMethod = "sessions.files.list" | "sessions.files.get";
+type SessionFilesMethod = "sessions.files.list" | "sessions.files.get" | "sessions.files.set";
 
 async function invokeSessionFilesHandler(
   method: SessionFilesMethod,
@@ -94,12 +95,17 @@ function writeWorkspaceFile(root: string, filePath: string, content: string) {
   fs.writeFileSync(resolved, content, "utf8");
 }
 
+function hashContent(content: string): string {
+  return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
 describe("sessions.files RPC handlers", () => {
   let workspaceRoot: string;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-session-files-test-"));
+    const tempRoot = fs.realpathSync(os.tmpdir());
+    workspaceRoot = fs.mkdtempSync(path.join(tempRoot, "openclaw-session-files-test-"));
     hoisted.resolveDefaultAgentId.mockReturnValue("main");
     hoisted.resolveAgentWorkspaceDir.mockReturnValue(workspaceRoot);
     writeWorkspaceFile(workspaceRoot, "package.json", '{"name":"openclaw-test"}\n');
@@ -285,6 +291,16 @@ describe("sessions.files RPC handlers", () => {
       }),
     );
     expect(preview.file.content).toBe("# Nested read me\n");
+    expect(preview.file.workspacePath).toBe("packages/app/src/readme.md");
+
+    const workspaceRootPreview = expectOkPayload(
+      await invokeSessionFilesHandler("sessions.files.get", {
+        sessionKey: "agent:main:main",
+        path: path.join(workspaceRoot, "src/readme.md"),
+      }),
+    );
+    expect(workspaceRootPreview.file.content).toBe("# Read me\n");
+    expect(workspaceRootPreview.file.workspacePath).toBe("src/readme.md");
 
     const browserPreview = expectOkPayload(
       await invokeSessionFilesHandler("sessions.files.get", {
@@ -374,7 +390,7 @@ describe("sessions.files RPC handlers", () => {
     ]);
   });
 
-  it("browses and searches workspace files without previewing browser-only files", async () => {
+  it("browses, searches, and previews files not referenced by the session", async () => {
     const folderPayload = expectOkPayload(
       await invokeSessionFilesHandler("sessions.files.list", {
         sessionKey: "agent:main:main",
@@ -406,16 +422,19 @@ describe("sessions.files RPC handlers", () => {
       searchPayload.browser.entries.map((entry: Record<string, unknown>) => entry.path),
     ).toEqual(["ui/vite.config.ts"]);
 
-    const error = expectError(
+    const preview = expectOkPayload(
       await invokeSessionFilesHandler("sessions.files.get", {
         sessionKey: "agent:main:main",
         path: "ui/vite.config.ts",
       }),
     );
 
-    expect(error.details).toMatchObject({
+    expect(preview.file).toMatchObject({
+      content: "export default {};\n",
+      hash: hashContent("export default {};\n"),
+      kind: "read",
+      missing: false,
       path: "ui/vite.config.ts",
-      type: "session_file_not_found",
     });
   });
 
@@ -439,7 +458,7 @@ describe("sessions.files RPC handlers", () => {
     expect(payload.browser.entries).toEqual([]);
   });
 
-  it("does not read absolute paths outside the configured workspace", async () => {
+  it("does not read absolute or parent-relative paths outside the configured workspace", async () => {
     const outsidePath = path.join(os.tmpdir(), `openclaw-outside-${Date.now()}.txt`);
     fs.writeFileSync(outsidePath, "outside\n", "utf8");
     hoisted.loadSessionEntry.mockReturnValue({
@@ -457,17 +476,19 @@ describe("sessions.files RPC handlers", () => {
     });
 
     try {
-      const error = expectError(
-        await invokeSessionFilesHandler("sessions.files.get", {
-          sessionKey: "agent:main:main",
-          path: outsidePath,
-        }),
-      );
+      for (const requestedPath of [outsidePath, "../outside.txt"]) {
+        const error = expectError(
+          await invokeSessionFilesHandler("sessions.files.get", {
+            sessionKey: "agent:main:main",
+            path: requestedPath,
+          }),
+        );
 
-      expect(error.details).toMatchObject({
-        path: outsidePath,
-        type: "session_file_not_found",
-      });
+        expect(error.details).toMatchObject({
+          path: requestedPath,
+          type: "session_file_not_found",
+        });
+      }
     } finally {
       fs.rmSync(outsidePath, { force: true });
     }
@@ -620,5 +641,196 @@ describe("sessions.files RPC handlers", () => {
       size: 260 * 1024,
       type: "session_file_too_large",
     });
+  });
+
+  it("overwrites an existing file when its hash matches", async () => {
+    const original = "export default {};\n";
+    const content = "export default { server: true };\n";
+
+    const payload = expectOkPayload(
+      await invokeSessionFilesHandler("sessions.files.set", {
+        sessionKey: "agent:main:main",
+        path: "ui/vite.config.ts",
+        content,
+        expectedHash: hashContent(original),
+      }),
+    );
+
+    expect(fs.readFileSync(path.join(workspaceRoot, "ui/vite.config.ts"), "utf8")).toBe(content);
+    expect(payload.file).toMatchObject({
+      path: "ui/vite.config.ts",
+      workspacePath: "ui/vite.config.ts",
+      name: "vite.config.ts",
+      kind: "modified",
+      missing: false,
+      size: Buffer.byteLength(content, "utf8"),
+      hash: hashContent(content),
+    });
+    expect(Number.isInteger(payload.file.updatedAtMs)).toBe(true);
+    expect(payload.file.content).toBeUndefined();
+    expect(hoisted.visitSessionMessagesAsync).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale file hash with the current hash", async () => {
+    const current = "export default {};\n";
+    const error = expectError(
+      await invokeSessionFilesHandler("sessions.files.set", {
+        sessionKey: "agent:main:main",
+        path: "ui/vite.config.ts",
+        content: "changed\n",
+        expectedHash: hashContent("stale\n"),
+      }),
+    );
+
+    expect(error.details).toEqual({
+      type: "session_file_conflict",
+      path: "ui/vite.config.ts",
+      currentHash: hashContent(current),
+    });
+    expect(fs.readFileSync(path.join(workspaceRoot, "ui/vite.config.ts"), "utf8")).toBe(current);
+  });
+
+  it("rejects writes to nonexistent files", async () => {
+    const error = expectError(
+      await invokeSessionFilesHandler("sessions.files.set", {
+        sessionKey: "agent:main:main",
+        path: "missing.txt",
+        content: "new\n",
+        expectedHash: hashContent(""),
+      }),
+    );
+
+    expect(error.details).toMatchObject({
+      path: "missing.txt",
+      type: "session_file_not_found",
+    });
+    expect(fs.existsSync(path.join(workspaceRoot, "missing.txt"))).toBe(false);
+  });
+
+  it("rejects replacement content over the workspace preview limit", async () => {
+    const error = expectError(
+      await invokeSessionFilesHandler("sessions.files.set", {
+        sessionKey: "agent:main:main",
+        path: "ui/vite.config.ts",
+        content: "x".repeat(256 * 1024 + 1),
+        expectedHash: hashContent("export default {};\n"),
+      }),
+    );
+
+    expect(error.details).toMatchObject({
+      maxPreviewBytes: 256 * 1024,
+      path: "ui/vite.config.ts",
+      size: 256 * 1024 + 1,
+      type: "session_file_too_large",
+    });
+  });
+
+  it("round-trips a UTF-8 BOM through get and set", async () => {
+    const original = "\uFEFFexport default {};\n";
+    writeWorkspaceFile(workspaceRoot, "bom.ts", original);
+
+    const preview = expectOkPayload(
+      await invokeSessionFilesHandler("sessions.files.get", {
+        sessionKey: "agent:main:main",
+        path: "bom.ts",
+      }),
+    );
+    expect(preview.file.content).toBe(original);
+    expect(preview.file.hash).toBe(hashContent(original));
+
+    const next = "\uFEFFexport default { bom: true };\n";
+    expectOkPayload(
+      await invokeSessionFilesHandler("sessions.files.set", {
+        sessionKey: "agent:main:main",
+        path: "bom.ts",
+        content: next,
+        expectedHash: preview.file.hash,
+      }),
+    );
+    const bytes = fs.readFileSync(path.join(workspaceRoot, "bom.ts"));
+    expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(bytes.toString("utf8")).toBe(next);
+  });
+
+  it("rejects replacement content containing NUL bytes", async () => {
+    const error = expectError(
+      await invokeSessionFilesHandler("sessions.files.set", {
+        sessionKey: "agent:main:main",
+        path: "ui/vite.config.ts",
+        content: "before\0after",
+        expectedHash: hashContent("export default {};\n"),
+      }),
+    );
+
+    expect(error.details).toMatchObject({
+      path: "ui/vite.config.ts",
+      type: "session_file_unsafe",
+    });
+    expect(fs.readFileSync(path.join(workspaceRoot, "ui/vite.config.ts"), "utf8")).toBe(
+      "export default {};\n",
+    );
+  });
+
+  it("previews binary files without issuing a CAS hash", async () => {
+    const binary = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02]);
+    fs.writeFileSync(path.join(workspaceRoot, "logo.png"), binary);
+
+    const payload = expectOkPayload(
+      await invokeSessionFilesHandler("sessions.files.get", {
+        sessionKey: "agent:main:main",
+        path: "logo.png",
+      }),
+    );
+
+    expect(typeof payload.file.content).toBe("string");
+    expect(payload.file.hash).toBeUndefined();
+  });
+
+  it("rejects writes to binary files even with a matching byte hash", async () => {
+    const binary = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02]);
+    fs.writeFileSync(path.join(workspaceRoot, "logo.png"), binary);
+
+    const error = expectError(
+      await invokeSessionFilesHandler("sessions.files.set", {
+        sessionKey: "agent:main:main",
+        path: "logo.png",
+        content: "text\n",
+        expectedHash: createHash("sha256").update(binary).digest("hex"),
+      }),
+    );
+
+    expect(error.details).toMatchObject({
+      path: "logo.png",
+      type: "session_file_unsafe",
+    });
+    expect(fs.readFileSync(path.join(workspaceRoot, "logo.png"))).toEqual(binary);
+  });
+
+  it("rejects escaped and symlinked write targets without touching outside files", async () => {
+    const tempRoot = fs.realpathSync(os.tmpdir());
+    const outsidePath = path.join(tempRoot, `openclaw-session-write-outside-${Date.now()}.txt`);
+    const escapedName = `openclaw-session-write-escape-${Date.now()}.txt`;
+    const escapedPath = path.resolve(workspaceRoot, "..", escapedName);
+    const outsideContent = "outside\n";
+    fs.writeFileSync(outsidePath, outsideContent, "utf8");
+    fs.symlinkSync(outsidePath, path.join(workspaceRoot, "linked.txt"));
+
+    try {
+      for (const requestedPath of [`../${escapedName}`, "linked.txt"]) {
+        const error = expectError(
+          await invokeSessionFilesHandler("sessions.files.set", {
+            sessionKey: "agent:main:main",
+            path: requestedPath,
+            content: "replaced\n",
+            expectedHash: hashContent(outsideContent),
+          }),
+        );
+        expect(["session_file_not_found", "session_file_unsafe"]).toContain(error.details.type);
+      }
+      expect(fs.readFileSync(outsidePath, "utf8")).toBe(outsideContent);
+      expect(fs.existsSync(escapedPath)).toBe(false);
+    } finally {
+      fs.rmSync(outsidePath, { force: true });
+    }
   });
 });
