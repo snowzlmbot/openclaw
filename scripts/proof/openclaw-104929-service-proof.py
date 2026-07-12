@@ -32,13 +32,14 @@ def wait_for(path: Path, timeout: float = 20.0) -> None:
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: service-proof.py <candidate-root> <artifact-dir>")
+    if len(sys.argv) != 4:
+        raise SystemExit("usage: service-proof.py <candidate-root> <artifact-dir> <node-path>")
     candidate = Path(sys.argv[1]).resolve()
     artifacts = Path(sys.argv[2]).resolve()
+    node_path = Path(sys.argv[3]).resolve()
     artifacts.mkdir(parents=True, exist_ok=True)
     worker = candidate / "scripts/proof/openclaw-104929-service-worker.mts"
-    tsx = candidate / "node_modules/.bin/tsx"
+    tsx = candidate / "node_modules/tsx/dist/cli.mjs"
     label = f"ai.openclaw.evidence.104929.service.{os.getpid()}"
     target = f"gui/{os.getuid()}"
     service = f"{target}/{label}"
@@ -54,7 +55,7 @@ def main() -> int:
             plistlib.dump(
                 {
                     "Label": label,
-                    "ProgramArguments": [str(tsx), str(worker), str(control)],
+                    "ProgramArguments": [str(node_path), str(tsx), str(worker), str(control)],
                     "WorkingDirectory": str(candidate),
                     "RunAtLoad": True,
                     "ProcessType": "Interactive",
@@ -120,4 +121,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

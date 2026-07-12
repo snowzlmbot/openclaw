@@ -19,6 +19,7 @@ jobs:
 
       - name: Prove launchd cannot contain new-session and double-fork descendants
         run: |
+          set -o pipefail
           mkdir -p proof-artifacts/openclaw-104929-launchd-boundary
           python3 scripts/proof/openclaw-104929-launchd-boundary.py \
             | tee proof-artifacts/openclaw-104929-launchd-boundary/result.json
@@ -70,6 +71,7 @@ jobs:
       - name: Run detached lease cleanup proof
         working-directory: candidate
         run: |
+          set -o pipefail
           mkdir -p ../proof-artifacts/openclaw-104929-candidate
           node scripts/run-vitest.mjs run \
             --config test/vitest/vitest.extension-acpx.config.ts \
@@ -82,6 +84,7 @@ jobs:
       - name: Run cancel and operator-feedback proof
         working-directory: candidate
         run: |
+          set -o pipefail
           node scripts/run-vitest.mjs run \
             --config test/vitest/vitest.unit.config.ts \
             src/acp/control-plane/manager.cancel-session.test.ts \
@@ -94,11 +97,13 @@ jobs:
       - name: Run service-managed ownership proof
         working-directory: candidate
         run: |
+          set -o pipefail
           mkdir -p scripts/proof
           cp ../evidence/scripts/proof/openclaw-104929-service-worker.mts scripts/proof/
           python3 ../evidence/scripts/proof/openclaw-104929-service-proof.py \
             . \
             ../proof-artifacts/openclaw-104929-candidate \
+            "$(command -v node)" \
             | tee ../proof-artifacts/openclaw-104929-candidate/service-proof.log
 
       - name: Upload candidate proof logs
