@@ -35,7 +35,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 30
     env:
-      CANDIDATE_SHA: fb4ac427414ae0475c1d8a8a6cb8fa5eb44a9196
+      CANDIDATE_SHA: 8ae631f7fe4beb088893d8c86d9810f069def1ed
     steps:
       - name: Checkout exact candidate
         uses: actions/checkout@v4
