@@ -9,7 +9,7 @@ import {
   resolvePlaywrightChromiumExecutablePath,
   startControlUiE2eServer,
   type ControlUiE2eServer,
-} from "../test-helpers/control-ui-e2e.ts";
+} from "./test-helpers/control-ui-e2e.ts";
 
 const chromiumExecutablePath = resolvePlaywrightChromiumExecutablePath(chromium.executablePath());
 const chromiumAvailable = canRunPlaywrightChromium(chromiumExecutablePath);
