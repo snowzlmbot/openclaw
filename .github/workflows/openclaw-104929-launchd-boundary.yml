@@ -36,7 +36,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 30
     env:
-      CANDIDATE_SHA: "466a7a0dafdd8efd4007e56d89841aa86815330f"
+      CANDIDATE_SHA: "3a993d6b268f1b69fe29f3293b8e90a24a2749c6"
     steps:
       - name: Checkout evidence harness
         uses: actions/checkout@v4
