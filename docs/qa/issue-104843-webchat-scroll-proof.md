@@ -1,17 +1,20 @@
 # Issue #104843 WebChat Scroll Proof
 
 This evidence-only workflow compares the reported `2026.6.11` release with the latest upstream
-`main` in a real Chromium browser on GitHub Actions.
+`main` in real Chromium browsers on GitHub-hosted Ubuntu and macOS runners.
 
 The browser test:
 
-1. Loads a long WebChat history through the repository's Mock Gateway.
+1. Loads a 140-message WebChat history through the repository's Mock Gateway.
 2. Uses the visible Control UI settings to select `Auto-scroll: Always`.
-3. Sends a chat turn through the real composer.
-4. Emits 480 accumulated assistant deltas at two-millisecond intervals.
-5. Samples `.chat-thread` geometry on every animation frame while recording Playwright video.
-6. Fails when the transcript remains more than 240 pixels from the bottom for six consecutive
-   animation frames during the active stream.
+3. Sends three chat turns through the real composer: a two-millisecond burst, a stream that crosses
+   animation-frame and 120/150ms retry boundaries, and a TTS-shaped final response with delayed
+   audio metadata.
+4. Alternates incomplete fenced Markdown, tables, long paragraphs, and final media rerenders.
+5. Samples `.chat-thread` geometry and node identity on every animation frame while recording
+   continuous Playwright video.
+6. Fails on a painted bottom-to-top jump or when the transcript remains more than 240 pixels from
+   the bottom for six consecutive animation frames during the active stream.
 
 Every matrix lane uploads:
 

@@ -23,24 +23,30 @@ const candidateSha = process.env.OPENCLAW_ISSUE_104843_SHA ?? "unknown-sha";
 
 type ScrollSample = {
   active: boolean;
+  catastrophicJump: boolean;
   chunk: number;
   clientHeight: number;
   distanceFromBottom: number;
   elapsedMs: number;
+  scenario: string;
   scrollHeight: number;
   scrollTop: number;
+  threadNodeId: number;
   violation: boolean;
 };
 
 type ProofResult = {
   candidate: string;
   candidateSha: string;
+  catastrophicJumpCount: number;
   chunks: number;
+  firstCatastrophicJump: ScrollSample | null;
   firstViolation: ScrollSample | null;
   longestViolationFrames: number;
   maxDistanceFromBottom: number;
   maxScrollHeight: number;
   sampleCount: number;
+  scenarios: string[];
   violationCount: number;
 };
 
@@ -104,18 +110,26 @@ async function installEvidenceOverlay(page: Page): Promise<void> {
             active: boolean;
             candidate: string;
             chunk: number;
+            nextThreadNodeId: number;
+            previousDistanceFromBottom: number;
             samples: ScrollSample[];
+            scenario: string;
             sha: string;
             startedAt: number;
+            threadNodeIds: WeakMap<HTMLElement, number>;
           };
         }
       ).issue104843Proof = {
         active: false,
         candidate,
         chunk: 0,
+        nextThreadNodeId: 1,
+        previousDistanceFromBottom: 0,
         samples: [],
+        scenario: "waiting",
         sha,
         startedAt: performance.now(),
+        threadNodeIds: new WeakMap<HTMLElement, number>(),
       };
     },
     { candidate: candidateLabel, sha: candidateSha },
@@ -130,9 +144,13 @@ async function startScrollSampling(page: Page): Promise<void> {
           active: boolean;
           candidate: string;
           chunk: number;
+          nextThreadNodeId: number;
+          previousDistanceFromBottom: number;
           samples: ScrollSample[];
+          scenario: string;
           sha: string;
           startedAt: number;
+          threadNodeIds: WeakMap<HTMLElement, number>;
         };
       }
     ).issue104843Proof;
@@ -150,29 +168,47 @@ async function startScrollSampling(page: Page): Promise<void> {
         const elapsedMs = Math.round(performance.now() - proof.startedAt);
         const violation =
           proof.active && thread.scrollHeight > thread.clientHeight * 2 && distanceFromBottom > 240;
+        const catastrophicJump =
+          proof.active &&
+          proof.previousDistanceFromBottom <= 8 &&
+          thread.scrollHeight > thread.clientHeight * 3 &&
+          thread.scrollTop <= 2;
+        let threadNodeId = proof.threadNodeIds.get(thread);
+        if (!threadNodeId) {
+          threadNodeId = proof.nextThreadNodeId;
+          proof.nextThreadNodeId += 1;
+          proof.threadNodeIds.set(thread, threadNodeId);
+        }
         const entry: ScrollSample = {
           active: proof.active,
+          catastrophicJump,
           chunk: proof.chunk,
           clientHeight: thread.clientHeight,
           distanceFromBottom,
           elapsedMs,
+          scenario: proof.scenario,
           scrollHeight: thread.scrollHeight,
           scrollTop: Math.round(thread.scrollTop),
+          threadNodeId,
           violation,
         };
         proof.samples.push(entry);
-        overlay.dataset.violation = String(violation);
+        proof.previousDistanceFromBottom = distanceFromBottom;
+        overlay.dataset.violation = String(violation || catastrophicJump);
         overlay.textContent = [
           "OpenClaw #104843 browser proof",
           `candidate: ${proof.candidate}`,
           `sha: ${proof.sha.slice(0, 12)}`,
           "Auto-scroll: Always",
+          `scenario: ${proof.scenario}`,
           `stream active: ${proof.active}`,
           `chunk: ${proof.chunk}`,
+          `thread node: ${entry.threadNodeId}`,
           `scrollTop: ${entry.scrollTop}`,
           `scrollHeight: ${entry.scrollHeight}`,
           `clientHeight: ${entry.clientHeight}`,
           `distanceFromBottom: ${entry.distanceFromBottom}`,
+          `catastrophic jump: ${entry.catastrophicJump}`,
           `violation: ${entry.violation}`,
         ].join("\n");
       }
@@ -182,9 +218,12 @@ async function startScrollSampling(page: Page): Promise<void> {
   });
 }
 
-async function emitHighFrequencyStream(page: Page, runId: string): Promise<number> {
+async function emitScenarioStream(
+  page: Page,
+  params: { chunks: number; intervalsMs: number[]; runId: string; scenario: string },
+): Promise<string> {
   return await page.evaluate(
-    async ({ id }) => {
+    async ({ chunks, id, intervalsMs, scenario }) => {
       const exposed = window as Window & {
         openclawControlUiE2eGateway?: {
           emit: (event: string, payload: unknown) => void;
@@ -193,7 +232,9 @@ async function emitHighFrequencyStream(page: Page, runId: string): Promise<numbe
           active: boolean;
           candidate: string;
           chunk: number;
+          previousDistanceFromBottom: number;
           samples: ScrollSample[];
+          scenario: string;
           sha: string;
           startedAt: number;
         };
@@ -205,9 +246,11 @@ async function emitHighFrequencyStream(page: Page, runId: string): Promise<numbe
       }
 
       proof.active = true;
+      proof.scenario = scenario;
+      proof.chunk = 0;
+      proof.previousDistanceFromBottom = 0;
       proof.startedAt = performance.now();
-      let accumulated = "# High-frequency streaming proof\n\n";
-      const chunks = 480;
+      let accumulated = `# ${scenario} streaming proof\n\n`;
       for (let chunk = 1; chunk <= chunks; chunk += 1) {
         proof.chunk = chunk;
         const section = Math.ceil(chunk / 8);
@@ -215,8 +258,13 @@ async function emitHighFrequencyStream(page: Page, runId: string): Promise<numbe
           chunk % 8 === 1
             ? `\n## Stream section ${section}\n\n`
             : `token-${chunk} preserves continuous streamed output and layout growth. `;
-        if (chunk % 24 === 0) {
-          accumulated += `\n\n\`\`\`text\nlate-layout-${chunk}\n${"0123456789 ".repeat(20)}\n\`\`\`\n`;
+        if (chunk % 48 === 1) {
+          accumulated += `\n\n\`\`\`text\nopen-fence-${chunk}\n${"0123456789 ".repeat(20)}\n`;
+        } else if (chunk % 48 === 24) {
+          accumulated += "\n```\n";
+        }
+        if (chunk % 37 === 0) {
+          accumulated += "\n| column a | column b |\n| --- | --- |\n| alpha | beta |\n";
         }
         gateway.emit("chat", {
           deltaText: accumulated,
@@ -229,13 +277,39 @@ async function emitHighFrequencyStream(page: Page, runId: string): Promise<numbe
           sessionKey: "main",
           state: "delta",
         });
-        await new Promise<void>((resolve) => window.setTimeout(resolve, 2));
+        const intervalMs = intervalsMs[(chunk - 1) % intervalsMs.length] ?? 0;
+        await new Promise<void>((resolve) => window.setTimeout(resolve, intervalMs));
       }
-      proof.active = false;
-      return chunks;
+      return accumulated;
     },
-    { id: runId },
+    {
+      chunks: params.chunks,
+      id: params.runId,
+      intervalsMs: params.intervalsMs,
+      scenario: params.scenario,
+    },
   );
+}
+
+function createSilentWav(): Buffer {
+  const sampleRate = 8_000;
+  const sampleCount = 2_000;
+  const dataSize = sampleCount * 2;
+  const buffer = Buffer.alloc(44 + dataSize);
+  buffer.write("RIFF", 0);
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write("WAVE", 8);
+  buffer.write("fmt ", 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate * 2, 28);
+  buffer.writeUInt16LE(2, 32);
+  buffer.writeUInt16LE(16, 34);
+  buffer.write("data", 36);
+  buffer.writeUInt32LE(dataSize, 40);
+  return buffer;
 }
 
 describeControlUiE2e("issue #104843 WebChat streaming scroll browser proof", () => {
@@ -258,12 +332,12 @@ describeControlUiE2e("issue #104843 WebChat streaming scroll browser proof", () 
     await server?.close();
   });
 
-  it("keeps Auto-scroll Always pinned during a high-frequency streamed response", async () => {
+  it("keeps Auto-scroll Always pinned across burst, retry-boundary, and TTS-shaped streams", async () => {
     const baseTs = Date.now() - 500_000;
-    const historyMessages = Array.from({ length: 70 }, (_, index) => ({
+    const historyMessages = Array.from({ length: 140 }, (_, index) => ({
       content: [
         {
-          text: `History message ${index + 1}\n${"Prior transcript evidence line.\n".repeat(4)}`,
+          text: `History message ${index + 1}\n${"Prior transcript evidence line.\n".repeat(6)}`,
           type: "text",
         },
       ],
@@ -271,36 +345,87 @@ describeControlUiE2e("issue #104843 WebChat streaming scroll browser proof", () 
       timestamp: baseTs + index,
     }));
     const gateway = await installMockGateway(page, { historyMessages });
+    const audioUrl = `${server.baseUrl}issue-104843-tone.wav`;
+    await page.route("**/issue-104843-tone.wav", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      await route.fulfill({ body: createSilentWav(), contentType: "audio/wav", status: 200 });
+    });
 
     await page.goto(`${server.baseUrl}chat`);
-    await page.getByText("History message 70").waitFor({ timeout: 15_000 });
+    await page.getByText("History message 140").waitFor({ timeout: 15_000 });
     await configureAlwaysAutoScroll(page);
     await installEvidenceOverlay(page);
     await startScrollSampling(page);
 
-    await expect
-      .poll(
-        () =>
-          page.locator(".chat-thread").evaluate((element) => {
-            const thread = element as HTMLElement;
-            return Math.round(thread.scrollHeight - thread.scrollTop - thread.clientHeight);
-          }),
-        { timeout: 15_000 },
-      )
-      .toBeLessThanOrEqual(4);
+    const scenarios = [
+      { chunks: 480, intervalsMs: [2], name: "raf-burst", ttsShapedFinal: false },
+      {
+        chunks: 176,
+        intervalsMs: [0, 1, 4, 15, 17, 33, 80, 119, 121, 149, 151],
+        name: "retry-boundaries",
+        ttsShapedFinal: false,
+      },
+      {
+        chunks: 320,
+        intervalsMs: [1, 4, 15, 17, 33],
+        name: "tts-shaped-delayed-audio",
+        ttsShapedFinal: true,
+      },
+    ];
+    let chunks = 0;
+    for (const scenario of scenarios) {
+      await expect
+        .poll(
+          () =>
+            page.locator(".chat-thread").evaluate((element) => {
+              const thread = element as HTMLElement;
+              return Math.round(thread.scrollHeight - thread.scrollTop - thread.clientHeight);
+            }),
+          { timeout: 15_000 },
+        )
+        .toBeLessThanOrEqual(4);
 
-    await gateway.deferNext("chat.send");
-    await page
-      .locator(".agent-chat__composer-combobox textarea")
-      .fill("Run the deterministic high-frequency streaming scroll proof.");
-    await page.getByRole("button", { name: "Send message" }).click();
-    const sendRequest = await gateway.waitForRequest("chat.send");
-    const params = sendRequest.params as Record<string, unknown>;
-    const runId = String(params.idempotencyKey ?? "");
-    expect(runId).not.toBe("");
+      await gateway.deferNext("chat.send");
+      await page
+        .locator(".agent-chat__composer-combobox textarea")
+        .fill(`Run deterministic ${scenario.name} streaming scroll proof.`);
+      await page.getByRole("button", { name: "Send message" }).click();
+      const sendRequest = await gateway.waitForRequest("chat.send");
+      const params = sendRequest.params as Record<string, unknown>;
+      const runId = String(params.idempotencyKey ?? "");
+      expect(runId).not.toBe("");
+      await gateway.resolveDeferred("chat.send", { runId, status: "started" });
 
-    const chunks = await emitHighFrequencyStream(page, runId);
-    await page.waitForTimeout(500);
+      const accumulated = await emitScenarioStream(page, {
+        chunks: scenario.chunks,
+        intervalsMs: scenario.intervalsMs,
+        runId,
+        scenario: scenario.name,
+      });
+      chunks += scenario.chunks;
+      const finalText = scenario.ttsShapedFinal
+        ? `${accumulated}\n\nTTS-shaped delayed audio attachment.\nMEDIA:${audioUrl}\n[[audio_as_voice]]`
+        : `${accumulated}\n\nFinalized ${scenario.name}.`;
+      await gateway.emitChatFinal({ runId, text: finalText });
+      if (scenario.ttsShapedFinal) {
+        await page.locator("audio").last().waitFor({ state: "attached", timeout: 10_000 });
+        await page.waitForTimeout(1_000);
+      } else {
+        await page.waitForTimeout(350);
+      }
+      await page.evaluate((scenarioName) => {
+        const proof = (
+          window as Window & {
+            issue104843Proof?: { active: boolean; scenario: string };
+          }
+        ).issue104843Proof;
+        if (proof) {
+          proof.active = false;
+          proof.scenario = `${scenarioName}:complete`;
+        }
+      }, scenario.name);
+    }
+
     await page.screenshot({ fullPage: true, path: path.join(artifactDir, "final-state.png") });
 
     const samples = await page.evaluate(() => {
@@ -314,6 +439,7 @@ describeControlUiE2e("issue #104843 WebChat streaming scroll browser proof", () 
     });
     const activeSamples = samples.filter((sample) => sample.active);
     const violations = activeSamples.filter((sample) => sample.violation);
+    const catastrophicJumps = activeSamples.filter((sample) => sample.catastrophicJump);
     let currentViolationFrames = 0;
     let longestViolationFrames = 0;
     for (const sample of activeSamples) {
@@ -323,7 +449,9 @@ describeControlUiE2e("issue #104843 WebChat streaming scroll browser proof", () 
     const result: ProofResult = {
       candidate: candidateLabel,
       candidateSha,
+      catastrophicJumpCount: catastrophicJumps.length,
       chunks,
+      firstCatastrophicJump: catastrophicJumps[0] ?? null,
       firstViolation: violations[0] ?? null,
       longestViolationFrames,
       maxDistanceFromBottom: Math.max(
@@ -332,6 +460,7 @@ describeControlUiE2e("issue #104843 WebChat streaming scroll browser proof", () 
       ),
       maxScrollHeight: Math.max(0, ...activeSamples.map((sample) => sample.scrollHeight)),
       sampleCount: samples.length,
+      scenarios: scenarios.map((scenario) => scenario.name),
       violationCount: violations.length,
     };
     await fs.writeFile(
@@ -348,9 +477,12 @@ describeControlUiE2e("issue #104843 WebChat streaming scroll browser proof", () 
         `# OpenClaw #104843 browser proof: ${candidateLabel}`,
         "",
         `- Candidate SHA: \`${candidateSha}\``,
+        `- Scenarios: ${result.scenarios.join(", ")}`,
         `- Streamed chunks: ${chunks}`,
         `- Animation-frame samples: ${samples.length}`,
         `- Maximum distance from bottom while streaming: ${result.maxDistanceFromBottom}px`,
+        `- Catastrophic bottom-to-top frames: ${result.catastrophicJumpCount}`,
+        `- First catastrophic jump: \`${JSON.stringify(result.firstCatastrophicJump)}\``,
         `- Violating frames (>240px from bottom in Always mode): ${result.violationCount}`,
         `- Longest consecutive violation: ${result.longestViolationFrames} frames`,
         `- First violation: \`${JSON.stringify(result.firstViolation)}\``,
@@ -360,8 +492,12 @@ describeControlUiE2e("issue #104843 WebChat streaming scroll browser proof", () 
     );
 
     expect(
+      result.catastrophicJumpCount,
+      `Auto-scroll Always painted ${result.catastrophicJumpCount} bottom-to-top jumps`,
+    ).toBe(0);
+    expect(
       result.longestViolationFrames,
       `Auto-scroll Always stayed more than 240px from the newest content for ${result.longestViolationFrames} consecutive frames and drifted by up to ${result.maxDistanceFromBottom}px`,
     ).toBeLessThan(6);
-  }, 90_000);
+  }, 180_000);
 });

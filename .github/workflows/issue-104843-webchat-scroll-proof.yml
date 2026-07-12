@@ -17,17 +17,29 @@ env:
 
 jobs:
   browser-proof:
-    name: ${{ matrix.candidate.label }}
-    runs-on: ubuntu-24.04
+    name: ${{ matrix.lane.label }}
+    runs-on: ${{ matrix.lane.runner }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        candidate:
-          - label: release-2026.6.11
+        lane:
+          - label: release-2026.6.11-linux
+            candidate: release-2026.6.11
             ref: e085fa1a3ffd32d0ea6917e1e6fb4ecbffbb77d2
-          - label: current-main
+            runner: ubuntu-24.04
+          - label: current-main-linux
+            candidate: current-main
             ref: main
+            runner: ubuntu-24.04
+          - label: release-2026.6.11-macos
+            candidate: release-2026.6.11
+            ref: e085fa1a3ffd32d0ea6917e1e6fb4ecbffbb77d2
+            runner: macos-15
+          - label: current-main-macos
+            candidate: current-main
+            ref: main
+            runner: macos-15
     steps:
       - name: Checkout evidence harness
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -39,7 +51,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           repository: openclaw/openclaw
-          ref: ${{ matrix.candidate.ref }}
+          ref: ${{ matrix.lane.ref }}
           persist-credentials: false
           fetch-depth: 1
           path: candidate
@@ -53,16 +65,17 @@ jobs:
           sha="$(git rev-parse HEAD)"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           {
-            echo "candidate: \`${{ matrix.candidate.label }}\`"
-            echo "candidate ref: \`${{ matrix.candidate.ref }}\`"
+            echo "lane: \`${{ matrix.lane.label }}\`"
+            echo "candidate: \`${{ matrix.lane.candidate }}\`"
+            echo "candidate ref: \`${{ matrix.lane.ref }}\`"
             echo "candidate SHA: \`$sha\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Initialize evidence directory
         working-directory: candidate
         env:
-          CANDIDATE_LABEL: ${{ matrix.candidate.label }}
-          CANDIDATE_REF: ${{ matrix.candidate.ref }}
+          CANDIDATE_LABEL: ${{ matrix.lane.label }}
+          CANDIDATE_REF: ${{ matrix.lane.ref }}
           CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
         shell: bash
         run: |
@@ -97,6 +110,13 @@ jobs:
         working-directory: candidate
         shell: bash
         run: pnpm exec playwright install --with-deps chromium
+        if: runner.os == 'Linux'
+
+      - name: Install Playwright Chromium on macOS
+        working-directory: candidate
+        shell: bash
+        run: pnpm exec playwright install chromium
+        if: runner.os == 'macOS'
 
       - name: Inject browser evidence test
         shell: bash
@@ -111,18 +131,18 @@ jobs:
         continue-on-error: true
         working-directory: candidate
         env:
-          OPENCLAW_ISSUE_104843_ARTIFACT_DIR: .artifacts/issue-104843-scroll-proof/${{ matrix.candidate.label }}
-          OPENCLAW_ISSUE_104843_CANDIDATE: ${{ matrix.candidate.label }}
+          OPENCLAW_ISSUE_104843_ARTIFACT_DIR: .artifacts/issue-104843-scroll-proof/${{ matrix.lane.label }}
+          OPENCLAW_ISSUE_104843_CANDIDATE: ${{ matrix.lane.label }}
           OPENCLAW_ISSUE_104843_SHA: ${{ steps.candidate.outputs.sha }}
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p ".artifacts/issue-104843-scroll-proof/${{ matrix.candidate.label }}"
+          mkdir -p ".artifacts/issue-104843-scroll-proof/${{ matrix.lane.label }}"
           pnpm exec vitest run \
             --config test/vitest/vitest.ui-e2e.config.ts \
             --configLoader runner \
             ui/src/issue-104843-scroll-proof.e2e.test.ts \
-            2>&1 | tee ".artifacts/issue-104843-scroll-proof/${{ matrix.candidate.label }}/vitest.log"
+            2>&1 | tee ".artifacts/issue-104843-scroll-proof/${{ matrix.lane.label }}/vitest.log"
 
       - name: Convert Playwright video to MP4
         if: always()
@@ -130,7 +150,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          root=".artifacts/issue-104843-scroll-proof/${{ matrix.candidate.label }}"
+          root=".artifacts/issue-104843-scroll-proof/${{ matrix.lane.label }}"
           video="$(find "$root" -maxdepth 1 -type f -name '*.webm' | head -1 || true)"
           if [[ -n "$video" ]] && command -v ffmpeg >/dev/null 2>&1; then
             ffmpeg -y -i "$video" -c:v libx264 -pix_fmt yuv420p "$root/browser-proof.mp4" || \
@@ -143,7 +163,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          summary=".artifacts/issue-104843-scroll-proof/${{ matrix.candidate.label }}/summary.md"
+          summary=".artifacts/issue-104843-scroll-proof/${{ matrix.lane.label }}/summary.md"
           if [[ -f "$summary" ]]; then
             cat "$summary" >> "$GITHUB_STEP_SUMMARY"
           else
@@ -154,8 +174,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: issue-104843-${{ matrix.candidate.label }}-${{ steps.candidate.outputs.sha }}
-          path: candidate/.artifacts/issue-104843-scroll-proof/${{ matrix.candidate.label }}/
+          name: issue-104843-${{ matrix.lane.label }}-${{ steps.candidate.outputs.sha }}
+          path: candidate/.artifacts/issue-104843-scroll-proof/${{ matrix.lane.label }}/
           if-no-files-found: warn
           retention-days: 30
 
