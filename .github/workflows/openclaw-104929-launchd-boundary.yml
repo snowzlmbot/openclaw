@@ -86,6 +86,15 @@ jobs:
             src/auto-reply/reply/abort.test.ts \
             | tee ../proof-artifacts/openclaw-104929-candidate/abort-feedback.log
 
+      - name: Run service-managed ownership proof
+        working-directory: candidate
+        run: |
+          cp ../scripts/proof/openclaw-104929-service-worker.mts scripts/proof/
+          python3 ../scripts/proof/openclaw-104929-service-proof.py \
+            . \
+            ../proof-artifacts/openclaw-104929-candidate \
+            | tee ../proof-artifacts/openclaw-104929-candidate/service-proof.log
+
       - name: Upload candidate proof logs
         if: always()
         uses: actions/upload-artifact@v4
