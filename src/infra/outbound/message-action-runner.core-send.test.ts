@@ -412,7 +412,6 @@ describe("runMessageAction core send routing", () => {
         accountId: "other",
         target: "channel:C123",
         message: "cross-account reply",
-        bestEffort: false,
       },
       toolContext: {
         currentChannelProvider: "slack",
