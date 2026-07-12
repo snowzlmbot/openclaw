@@ -397,6 +397,32 @@ describe("runMessageAction core send routing", () => {
     ).toBeUndefined();
   });
 
+  it("does not mark same-target sends to another thread as source replies", async () => {
+    registerSlackTextPlugin();
+
+    const result = await runMessageAction({
+      cfg: slackConfig,
+      action: "send",
+      params: {
+        channel: "slack",
+        target: "channel:C123",
+        threadId: "other-thread",
+        message: "thread-only reply",
+      },
+      toolContext: {
+        currentChannelProvider: "slack",
+        currentChannelId: "channel:C123",
+        currentThreadTs: "source-thread",
+      },
+      sessionKey: "agent:main:slack:channel:C123:thread:source-thread",
+      sourceReplyDeliveryMode: "message_tool_only",
+      dryRun: false,
+    });
+
+    expect(result.kind).toBe("send");
+    expect((result.payload as { sourceReplyRoute?: unknown }).sourceReplyRoute).toBeUndefined();
+  });
+
   it("prepends messages.responsePrefix to message-tool sends", async () => {
     const sendText = registerSlackTextPlugin();
 
