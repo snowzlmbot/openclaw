@@ -95,6 +95,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
@@ -924,6 +925,8 @@ class NodeRuntime private constructor(
   @Volatile internal var gatewayDataRequestOverrideForTests: GatewayDataRequestOverride? = null
 
   @Volatile internal var gatewayDataRequestTimeoutObserverForTests: ((method: String, timeoutMs: Long) -> Unit)? = null
+
+  @Volatile internal var clawHubSkillInstallBeforeClaimObserverForTests: (() -> Unit)? = null
   private val _channelsSummary = MutableStateFlow(GatewayChannelsSummary(channels = emptyList()))
   val channelsSummary: StateFlow<GatewayChannelsSummary> = _channelsSummary.asStateFlow()
   private val _channelsRefreshing = MutableStateFlow(false)
@@ -1833,14 +1836,14 @@ class NodeRuntime private constructor(
       _clawHubSkillSearchState.value.copy(reviewingSlug = null, installReview = null)
   }
 
-  fun installClawHubSkill(
+  internal fun installClawHubSkill(
     slug: String,
     acknowledgeClawHubRisk: Boolean = false,
     version: String? = null,
-  ) {
+  ): Job? {
     val normalized = slug.trim()
-    if (normalized.isEmpty()) return
-    scope.launch {
+    if (normalized.isEmpty()) return null
+    return scope.launch {
       installClawHubSkillFromGateway(
         slug = normalized,
         acknowledgeClawHubRisk = acknowledgeClawHubRisk,
@@ -4797,17 +4800,21 @@ class NodeRuntime private constructor(
       }
       return
     }
+    clawHubSkillInstallBeforeClaimObserverForTests?.invoke()
     val claimed =
       clawHubSkillInstallMutex.withLock {
-        if (slug in _clawHubSkillSearchState.value.installingSlugs) {
-          false
-        } else {
-          _clawHubSkillSearchState.value =
-            _clawHubSkillSearchState.value.copy(
-              installingSlugs = _clawHubSkillSearchState.value.installingSlugs + slug,
-            )
-          true
+        var published = false
+        // Gateway switches reset this shared UI state while installs can wait
+        // on the mutex. Claim under the scope lock so stale work cannot leak in.
+        publishGatewayData(gatewayScope) {
+          val current = _clawHubSkillSearchState.value
+          if (slug !in current.installingSlugs) {
+            _clawHubSkillSearchState.value =
+              current.copy(installingSlugs = current.installingSlugs + slug)
+            published = true
+          }
         }
+        published
       }
     if (!claimed) return
     val attemptedVersion = version?.trim()?.takeIf(String::isNotEmpty)

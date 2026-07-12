@@ -3,6 +3,8 @@ package ai.openclaw.app
 import ai.openclaw.app.gateway.GatewayEndpoint
 import ai.openclaw.app.gateway.GatewayRequestOutcomeUnknown
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -14,6 +16,8 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.lang.reflect.Field
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
@@ -50,11 +54,10 @@ class ClawHubSkillRuntimeTest {
       }
     }
 
-    runtime.installClawHubSkill("registry-slug", version = "1.2.3")
-    waitUntil {
-      installCalls.get() == 1 &&
-        "registry-slug" !in runtime.clawHubSkillSearchState.value.installingSlugs
-    }
+    val firstInstall =
+      runtime.installClawHubSkill("registry-slug", version = "1.2.3")
+        ?: error("install job missing")
+    runBlocking { firstInstall.join() }
 
     assertEquals(CLAWHUB_INSTALL_REQUEST_TIMEOUT_MS, installTimeoutMs)
     assertTrue(
@@ -62,12 +65,16 @@ class ClawHubSkillRuntimeTest {
         .orEmpty()
         .contains("result for registry-slug is unknown"),
     )
-    runtime.installClawHubSkill("registry-slug", version = "1.2.3")
-    waitUntil { installCalls.get() == 2 }
+    val retryInstall =
+      runtime.installClawHubSkill("registry-slug", version = "1.2.3")
+        ?: error("retry job missing")
+    runBlocking { retryInstall.join() }
 
     installed = true
-    runtime.installClawHubSkill("registry-slug", version = "1.2.3")
-    waitUntil { runtime.clawHubSkillSearchState.value.messageText == "Installed registry-slug." }
+    val confirmedInstall =
+      runtime.installClawHubSkill("registry-slug", version = "1.2.3")
+        ?: error("confirm job missing")
+    runBlocking { confirmedInstall.join() }
 
     assertEquals(3, installCalls.get())
     assertFalse(
@@ -76,6 +83,38 @@ class ClawHubSkillRuntimeTest {
         .contains("unknown"),
     )
     assertEquals("Installed registry-slug.", runtime.clawHubSkillSearchState.value.messageText)
+  }
+
+  @Test
+  fun staleGatewayCannotClaimAnInstallAfterGatewaySwitch() {
+    val runtime = createTestRuntime()
+    seedConnectedAdminRuntime(runtime)
+    val installCalls = AtomicInteger()
+    runtime.gatewayDataRequestOverrideForTests = { _, _, _ ->
+      installCalls.incrementAndGet()
+      error("stale gateway request must not run")
+    }
+    val waitingToClaim = CountDownLatch(1)
+    runtime.clawHubSkillInstallBeforeClaimObserverForTests = { waitingToClaim.countDown() }
+    val installMutex = readField<Mutex>(runtime, "clawHubSkillInstallMutex")
+    runBlocking { installMutex.lock() }
+
+    val installJob =
+      runtime.installClawHubSkill("registry-slug", version = "1.2.3")
+        ?: error("install job missing")
+    assertTrue(waitingToClaim.await(5, TimeUnit.SECONDS))
+    writeField(runtime, "connectedEndpoint", GatewayEndpoint.manual("127.0.0.2", 18789))
+    writeField(runtime, "gatewayDataGeneration", readField<Long>(runtime, "gatewayDataGeneration") + 1)
+    readField<MutableStateFlow<GatewayClawHubSkillSearchState>>(runtime, "_clawHubSkillSearchState").value =
+      GatewayClawHubSkillSearchState()
+    installMutex.unlock()
+
+    runBlocking { installJob.join() }
+    assertTrue(
+      runtime.clawHubSkillSearchState.value.installingSlugs
+        .isEmpty(),
+    )
+    assertEquals(0, installCalls.get())
   }
 
   private fun skillsStatus(installed: Boolean): String =
