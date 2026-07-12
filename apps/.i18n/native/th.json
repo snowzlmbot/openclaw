@@ -714,14 +714,49 @@
       "translated": "ไม่สามารถเปิดใช้งาน Skill ได้"
     },
     {
+      "id": "native.android.bf2cff15c08664b1",
+      "source": "Connect the gateway to search ClawHub skills.",
+      "translated": "เชื่อมต่อ Gateway เพื่อค้นหา Skills ใน ClawHub"
+    },
+    {
+      "id": "native.android.55c752347d7bfe7b",
+      "source": "Could not search ClawHub skills.",
+      "translated": "ไม่สามารถค้นหา Skills ใน ClawHub ได้"
+    },
+    {
+      "id": "native.android.06bb559130390ab4",
+      "source": "Connect the gateway to inspect ClawHub skills.",
+      "translated": "เชื่อมต่อ Gateway เพื่อตรวจสอบ Skills ใน ClawHub"
+    },
+    {
       "id": "native.android.57c31cd4bd7c5146",
       "source": "ClawHub did not return an installable version for ${skill.slug}.",
       "translated": "ClawHub ไม่ได้ส่งคืนเวอร์ชันที่ติดตั้งได้สำหรับ ${skill.slug}"
     },
     {
+      "id": "native.android.ecf82b1ac9d18307",
+      "source": "Could not load ClawHub details for ${skill.slug}.",
+      "translated": "ไม่สามารถโหลดรายละเอียดจาก ClawHub สำหรับ ${skill.slug} ได้"
+    },
+    {
+      "id": "native.android.4154579c8cb1c995",
+      "source": "Connect the gateway to install ClawHub skills.",
+      "translated": "เชื่อมต่อ Gateway เพื่อติดตั้ง Skills จาก ClawHub"
+    },
+    {
+      "id": "native.android.7855f19374e6e747",
+      "source": "This gateway connection needs operator.admin to install ClawHub skills.",
+      "translated": "การเชื่อมต่อ Gateway นี้ต้องมีสิทธิ์ operator.admin เพื่อติดตั้ง Skills จาก ClawHub"
+    },
+    {
       "id": "native.android.468b886c0b50dd1c",
       "source": "Installed $slug.",
       "translated": "ติดตั้ง $slug แล้ว"
+    },
+    {
+      "id": "native.android.dd89b658efc5d083",
+      "source": "Could not install ${slug} from ClawHub.",
+      "translated": "ไม่สามารถติดตั้ง ${slug} จาก ClawHub ได้"
     },
     {
       "id": "native.android.0786911a50b87f4a",
@@ -6129,9 +6164,9 @@
       "translated": "Skills ที่ติดตั้งแล้ว"
     },
     {
-      "id": "native.android.8e4ec9c6452e47f4",
-      "source": "$visibleCount/$totalCount",
-      "translated": "$visibleCount/$totalCount"
+      "id": "native.android.47ee8c52e754f17d",
+      "source": "${visibleCount}/${totalCount}",
+      "translated": "${visibleCount}/${totalCount}"
     },
     {
       "id": "native.android.8748f97cadea1632",
