@@ -31,6 +31,7 @@ const BROADCAST_SEND_ENVELOPE_KEYS = ["payload", "result", "sendResult", "toolRe
 const PARTIAL_DELIVERY_ENVELOPE_KEYS = [...RESULT_ENVELOPE_KEYS, "error", "cause"];
 const SESSIONS_SEND_DELIVERY_STATUSES = new Set(["accepted", "ok"]);
 const BARE_OK_DELIVERY_STATUS = "ok";
+const CURRENT_SOURCE_REPLY_ROUTE = "current-source";
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -73,6 +74,35 @@ function isBareSentDeliveryStatus(value: unknown): boolean {
 
 function parseJsonRecord(value: string): Record<string, unknown> | undefined {
   return asOptionalRecord(safeParseJson(value));
+}
+
+function deliveryEnvelopeConfirmsCurrentSourceRoute(value: unknown, depth = 0): boolean {
+  if (!value || typeof value !== "object" || depth > 4) {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => deliveryEnvelopeConfirmsCurrentSourceRoute(item, depth + 1));
+  }
+  const record = value as Record<string, unknown>;
+  if (record.sourceReplyRoute === CURRENT_SOURCE_REPLY_ROUTE) {
+    return true;
+  }
+  if (typeof record.text === "string") {
+    const parsed = parseJsonRecord(record.text);
+    if (parsed && deliveryEnvelopeConfirmsCurrentSourceRoute(parsed, depth + 1)) {
+      return true;
+    }
+  }
+  const content = record.content;
+  if (
+    Array.isArray(content) &&
+    content.some((item) => deliveryEnvelopeConfirmsCurrentSourceRoute(item, depth + 1))
+  ) {
+    return true;
+  }
+  return RESULT_ENVELOPE_KEYS.some((key) =>
+    deliveryEnvelopeConfirmsCurrentSourceRoute(record[key], depth + 1),
+  );
 }
 
 function recordHasDeliveredMessageId(record: Record<string, unknown>): boolean {
@@ -563,7 +593,11 @@ export function isDeliveredMessageToolOnlySourceReplyResult(params: {
   if (!isMessageToolSendActionName(args.action) && !sourceRouteReplyAction) {
     return false;
   }
-  if (hasExplicitMessageRoute(args) && params.allowExplicitSourceRoute !== true) {
+  const hasConfirmedExplicitSourceRoute =
+    params.allowExplicitSourceRoute === true ||
+    deliveryEnvelopeConfirmsCurrentSourceRoute(params.result) ||
+    deliveryEnvelopeConfirmsCurrentSourceRoute(params.hookResult);
+  if (hasExplicitMessageRoute(args) && !hasConfirmedExplicitSourceRoute) {
     return false;
   }
   return isDeliveredMessagingToolResult(params);

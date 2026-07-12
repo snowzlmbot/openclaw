@@ -215,6 +215,39 @@ export function getToolResult(
   return "toolResult" in result ? result.toolResult : undefined;
 }
 
+const CURRENT_SOURCE_REPLY_ROUTE = "current-source";
+
+function readObjectRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function markCurrentSourceReplyResult(result: MessageActionRunResult): MessageActionRunResult {
+  if (result.kind !== "send") {
+    return result;
+  }
+  const payload = readObjectRecord(result.payload);
+  const toolResultDetails = readObjectRecord(result.toolResult?.details);
+  return {
+    ...result,
+    payload: payload
+      ? { ...payload, sourceReplyRoute: CURRENT_SOURCE_REPLY_ROUTE }
+      : result.payload,
+    ...(result.toolResult
+      ? {
+          toolResult: {
+            ...result.toolResult,
+            details: {
+              ...toolResultDetails,
+              sourceReplyRoute: CURRENT_SOURCE_REPLY_ROUTE,
+            },
+          },
+        }
+      : {}),
+  };
+}
+
 function resolveGatewayActionOptions(gateway?: MessageActionRunnerGateway) {
   return resolveOutboundMessageGatewayOptions(gateway);
 }
@@ -705,6 +738,24 @@ function applyImplicitSourceReplySendPolicy(
     return;
   }
   params.bestEffort = true;
+}
+
+function isCurrentSourceReplySend(params: {
+  input: RunMessageActionParams;
+  actionParams: Record<string, unknown>;
+  resolvedThreadId?: string;
+}): boolean {
+  if (
+    params.input.dryRun === true ||
+    params.input.sourceReplyDeliveryMode !== "message_tool_only" ||
+    hasExplicitNonCurrentChannelParam(params.input, params.actionParams) ||
+    !isCurrentSourceTargetParam(params.input, params.actionParams)
+  ) {
+    return false;
+  }
+  const currentThreadId = normalizeOptionalString(params.input.toolContext?.currentThreadTs);
+  const resolvedThreadId = normalizeOptionalString(params.resolvedThreadId);
+  return currentThreadId ? resolvedThreadId === currentThreadId : !resolvedThreadId;
 }
 
 async function runGatewayPluginMessageActionOrNull(params: {
@@ -1277,7 +1328,9 @@ async function handleSendAction(ctx: ResolvedActionContext): Promise<MessageActi
     }),
   });
   if (gatewayPluginAction) {
-    return gatewayPluginAction;
+    return isCurrentSourceReplySend({ input, actionParams: params, resolvedThreadId })
+      ? markCurrentSourceReplyResult(gatewayPluginAction)
+      : gatewayPluginAction;
   }
 
   const useCorePresentationDelivery = Boolean(
@@ -1352,7 +1405,7 @@ async function handleSendAction(ctx: ResolvedActionContext): Promise<MessageActi
     threadId: resolvedThreadId ?? undefined,
   });
 
-  return {
+  const result: MessageActionRunResult = {
     kind: "send",
     channel,
     action,
@@ -1363,6 +1416,9 @@ async function handleSendAction(ctx: ResolvedActionContext): Promise<MessageActi
     sendResult: send.sendResult,
     dryRun,
   };
+  return isCurrentSourceReplySend({ input, actionParams: params, resolvedThreadId })
+    ? markCurrentSourceReplyResult(result)
+    : result;
 }
 
 async function handlePollAction(ctx: ResolvedActionContext): Promise<MessageActionRunResult> {

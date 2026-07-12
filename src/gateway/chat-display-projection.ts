@@ -39,11 +39,13 @@ type RoleContentMessage = {
 type PendingMessageToolVisibleReply = {
   toolCallId?: string;
   text: string;
+  requiresSourceRouteConfirmation: boolean;
   anchor: Record<string, unknown>;
   completionAnchor?: Record<string, unknown>;
   deliveryMirrorAnchor?: Record<string, unknown>;
   deliveryMirrorIndex?: number;
   sourceReplySink?: "internal-ui";
+  sourceReplyRoute?: "current-source";
   succeeded: boolean;
 };
 
@@ -900,15 +902,17 @@ function extractMessageToolVisibleReplies(
     if (isDryRunMessageToolRecord(args)) {
       continue;
     }
-    if (hasExplicitMessageToolRoute(args)) {
-      continue;
-    }
+    const requiresSourceRouteConfirmation = hasExplicitMessageToolRoute(args);
     const text = readMessageToolVisibleText(args);
     if (!text?.trim()) {
       continue;
     }
     const toolCallId = readToolBlockCallId(record);
-    replies.push({ ...(toolCallId ? { toolCallId } : {}), text });
+    replies.push({
+      ...(toolCallId ? { toolCallId } : {}),
+      text,
+      requiresSourceRouteConfirmation,
+    });
   }
   return replies;
 }
@@ -1014,10 +1018,14 @@ function isSuccessfulMessageToolResult(
     return false;
   }
   const resultCallId = readMessageToolResultCallId(message);
+  const hasSuccessfulPayload = isSuccessfulMessageToolResultPayload(message);
+  const hasConfirmedSourceRoute =
+    !pending.requiresSourceRouteConfirmation ||
+    readMessageToolSourceReplyRoute(message) === "current-source";
   if (pending.toolCallId) {
-    return resultCallId === pending.toolCallId && isSuccessfulMessageToolResultPayload(message);
+    return resultCallId === pending.toolCallId && hasSuccessfulPayload && hasConfirmedSourceRoute;
   }
-  return isSuccessfulMessageToolResultPayload(message);
+  return hasSuccessfulPayload && hasConfirmedSourceRoute;
 }
 
 function isSuccessfulMessageToolResultPayload(message: Record<string, unknown>): boolean {
@@ -1047,6 +1055,32 @@ function readMessageToolSourceReplySink(
   return details?.sourceReplySink === "internal-ui" ? "internal-ui" : undefined;
 }
 
+function readMessageToolSourceReplyRoute(
+  message: Record<string, unknown>,
+): "current-source" | undefined {
+  const values = [message.details, message.result, message.output, message.content, message.text];
+  for (const value of values) {
+    const record = readMaybeJsonRecord(value);
+    if (record?.sourceReplyRoute === "current-source") {
+      return "current-source";
+    }
+    if (!Array.isArray(value)) {
+      continue;
+    }
+    for (const block of value) {
+      const blockRecord = readRecord(block);
+      if (blockRecord?.sourceReplyRoute === "current-source") {
+        return "current-source";
+      }
+      const textRecord = readMaybeJsonRecord(blockRecord?.text);
+      if (textRecord?.sourceReplyRoute === "current-source") {
+        return "current-source";
+      }
+    }
+  }
+  return undefined;
+}
+
 function buildMessageToolVisibleReplyMirror(
   pending: PendingMessageToolVisibleReply,
 ): Record<string, unknown> {
@@ -1058,6 +1092,7 @@ function buildMessageToolVisibleReplyMirror(
       toolName: "message",
       ...(pending.toolCallId ? { toolCallId: pending.toolCallId } : {}),
       ...(pending.sourceReplySink ? { sourceReplySink: pending.sourceReplySink } : {}),
+      ...(pending.sourceReplyRoute ? { sourceReplyRoute: pending.sourceReplyRoute } : {}),
       ...(pending.sourceReplySink && sourceMessageSeq ? { sourceMessageSeq } : {}),
     },
   };
@@ -1179,6 +1214,10 @@ function mirrorMessageToolVisibleReplies(messages: unknown[]): unknown[] {
           const sourceReplySink = readMessageToolSourceReplySink(record);
           if (sourceReplySink) {
             item.sourceReplySink = sourceReplySink;
+          }
+          const sourceReplyRoute = readMessageToolSourceReplyRoute(record);
+          if (sourceReplyRoute) {
+            item.sourceReplyRoute = sourceReplyRoute;
           }
           item.completionAnchor = item.deliveryMirrorAnchor ?? record;
           if (item.deliveryMirrorAnchor) {

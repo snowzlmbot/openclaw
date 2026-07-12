@@ -343,6 +343,60 @@ describe("runMessageAction core send routing", () => {
     expect(sendText).toHaveBeenCalledOnce();
   });
 
+  it("marks explicit sends that resolve to the current source conversation", async () => {
+    registerSlackTextPlugin();
+
+    const result = await runMessageAction({
+      cfg: slackConfig,
+      action: "send",
+      params: {
+        channel: "slack",
+        target: "channel:C123",
+        message: "visible source reply",
+      },
+      toolContext: {
+        currentChannelProvider: "slack",
+        currentChannelId: "channel:C123",
+      },
+      sessionKey: "agent:main:slack:channel:C123",
+      sourceReplyDeliveryMode: "message_tool_only",
+      dryRun: false,
+    });
+
+    expect(result.kind).toBe("send");
+    expect(result.payload).toMatchObject({ sourceReplyRoute: "current-source" });
+  });
+
+  it("does not mark explicit sends to another conversation as source replies", async () => {
+    registerSlackTextPlugin();
+
+    const result = await runMessageAction({
+      cfg: slackConfig,
+      action: "send",
+      params: {
+        channel: "slack",
+        target: "channel:OTHER",
+        message: "remote reply",
+      },
+      toolContext: {
+        currentChannelProvider: "slack",
+        currentChannelId: "channel:C123",
+      },
+      sessionKey: "agent:main:slack:channel:C123",
+      sourceReplyDeliveryMode: "message_tool_only",
+      dryRun: false,
+    });
+
+    expect(result.kind).toBe("send");
+    expect((result.payload as { sourceReplyRoute?: unknown }).sourceReplyRoute).toBeUndefined();
+    expect(
+      result.kind === "send"
+        ? (result.toolResult?.details as { sourceReplyRoute?: unknown } | undefined)
+            ?.sourceReplyRoute
+        : undefined,
+    ).toBeUndefined();
+  });
+
   it("prepends messages.responsePrefix to message-tool sends", async () => {
     const sendText = registerSlackTextPlugin();
 

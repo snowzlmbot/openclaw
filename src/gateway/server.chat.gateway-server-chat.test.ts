@@ -1389,6 +1389,80 @@ describe("gateway server chat", () => {
     ).toBe(false);
   });
 
+  test("chat.history keeps confirmed current-source sends before a later run final", async () => {
+    const sourceReply = "Visible reply delivered to Telegram.";
+    const laterFinal = "A later run produced this different final.";
+    const historyMessages = await loadChatHistoryWithMessages([
+      {
+        role: "user",
+        content: [{ type: "text", text: "reply in this Telegram chat" }],
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "call-message-current-source",
+            name: "message",
+            arguments: {
+              action: "send",
+              channel: "telegram",
+              target: "8455538490",
+              message: sourceReply,
+            },
+          },
+        ],
+        timestamp: 2,
+      },
+      {
+        role: "toolResult",
+        toolName: "message",
+        toolCallId: "call-message-current-source",
+        content: { ok: true, messageId: "24269", chatId: "8455538490" },
+        details: {
+          ok: true,
+          messageId: "24269",
+          chatId: "8455538490",
+          sourceReplyRoute: "current-source",
+        },
+        timestamp: 3,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "NO_REPLY" }],
+        timestamp: 4,
+      },
+      {
+        role: "user",
+        content: [{ type: "text", text: "continue" }],
+        timestamp: 5,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: laterFinal }],
+        timestamp: 6,
+      },
+    ]);
+
+    expect(collectHistoryTextValues(historyMessages)).toEqual([
+      "reply in this Telegram chat",
+      sourceReply,
+      "continue",
+      laterFinal,
+    ]);
+    expect(historyMessages).toContainEqual(
+      expect.objectContaining({
+        role: "assistant",
+        content: [{ type: "text", text: sourceReply }],
+        openclawMessageToolMirror: expect.objectContaining({
+          toolCallId: "call-message-current-source",
+          sourceReplyRoute: "current-source",
+        }),
+      }),
+    );
+  });
+
   test("chat.history does not mirror message tool sends from unmatched results", async () => {
     const historyMessages = await loadChatHistoryWithMessages([
       {

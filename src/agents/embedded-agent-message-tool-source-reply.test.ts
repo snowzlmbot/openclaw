@@ -375,4 +375,27 @@ describe("isDeliveredMessageToolOnlySourceReplyResult", () => {
       }),
     ).toBe(false);
   });
+
+  it("accepts explicit sends when the delivery result proves the current source route", () => {
+    expect(
+      isDeliveredMessageToolOnlySourceReplyResult({
+        sourceReplyDeliveryMode: "message_tool_only",
+        toolName: "message",
+        args: {
+          action: "send",
+          channel: "telegram",
+          target: "8455538490",
+          message: "reply",
+        },
+        result: {
+          content: [{ type: "text", text: '{"ok":true}' }],
+          details: {
+            ok: true,
+            messageId: "telegram-242",
+            sourceReplyRoute: "current-source",
+          },
+        },
+      }),
+    ).toBe(true);
+  });
 });
