@@ -4657,7 +4657,7 @@ class NodeRuntime private constructor(
       _clawHubSkillSearchState.value =
         GatewayClawHubSkillSearchState(
           query = normalized,
-          errorText = "Connect the gateway to search ClawHub skills.",
+          errorText = nativeString("Connect the gateway to search ClawHub skills."),
         )
       return
     }
@@ -4703,7 +4703,7 @@ class NodeRuntime private constructor(
           _clawHubSkillSearchState.value =
             _clawHubSkillSearchState.value.copy(
               searching = false,
-              errorText = "Could not search ClawHub skills.",
+              errorText = nativeString("Could not search ClawHub skills."),
             )
         }
       }
@@ -4716,7 +4716,7 @@ class NodeRuntime private constructor(
     if (gatewayScope == null || !operatorConnected) {
       _clawHubSkillSearchState.value =
         _clawHubSkillSearchState.value.copy(
-          errorText = "Connect the gateway to inspect ClawHub skills.",
+          errorText = nativeString("Connect the gateway to inspect ClawHub skills."),
         )
       return
     }
@@ -4764,7 +4764,8 @@ class NodeRuntime private constructor(
           _clawHubSkillSearchState.value =
             _clawHubSkillSearchState.value.copy(
               reviewingSlug = null,
-              errorText = "Could not load ClawHub details for ${skill.slug}.",
+              errorText =
+                nativeString("Could not load ClawHub details for \${skill.slug}.", skill.slug),
             )
         }
       }
@@ -4780,7 +4781,7 @@ class NodeRuntime private constructor(
     if (gatewayScope == null || !operatorConnected) {
       _clawHubSkillSearchState.value =
         _clawHubSkillSearchState.value.copy(
-          errorText = "Connect the gateway to install ClawHub skills.",
+          errorText = nativeString("Connect the gateway to install ClawHub skills."),
         )
       return
     }
@@ -4795,7 +4796,10 @@ class NodeRuntime private constructor(
       publishGatewayData(gatewayScope) {
         _clawHubSkillSearchState.value =
           _clawHubSkillSearchState.value.copy(
-            errorText = "This gateway connection needs operator.admin to install ClawHub skills.",
+            errorText =
+              nativeString(
+                "This gateway connection needs operator.admin to install ClawHub skills.",
+              ),
           )
       }
       return
@@ -4889,7 +4893,9 @@ class NodeRuntime private constructor(
     } catch (_: Throwable) {
       publishGatewayData(gatewayScope) {
         _clawHubSkillSearchState.value =
-          _clawHubSkillSearchState.value.copy(errorText = "Could not install $slug from ClawHub.")
+          _clawHubSkillSearchState.value.copy(
+            errorText = nativeString("Could not install \${slug} from ClawHub.", slug),
+          )
       }
     } finally {
       releaseClawHubInstallClaim(slug, gatewayScope)

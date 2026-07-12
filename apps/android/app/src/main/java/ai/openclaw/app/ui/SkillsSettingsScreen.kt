@@ -249,7 +249,10 @@ private fun InstalledSkillSearchPanel(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
       ) {
         Text(text = nativeString("Installed skills"), style = ClawTheme.type.section, color = ClawTheme.colors.text, modifier = Modifier.weight(1f))
-        ClawStatusPill(text = "$visibleCount/$totalCount", status = ClawStatus.Neutral)
+        ClawStatusPill(
+          text = nativeString("\${visibleCount}/\${totalCount}", visibleCount, totalCount),
+          status = ClawStatus.Neutral,
+        )
       }
       ClawTextField(value = query, onValueChange = onQueryChange, placeholder = nativeString("Search installed skills"))
     }
