@@ -1,0 +1,149 @@
+name: Issue 104843 WebChat Scroll Proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-104843-webchat-scroll-proof-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  NODE_VERSION: "24.x"
+  RELEASE_SHA: e085fa1a3ffd32d0ea6917e1e6fb4ecbffbb77d2
+
+jobs:
+  browser-proof:
+    name: ${{ matrix.candidate.label }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        candidate:
+          - label: release-2026.6.11
+            ref: e085fa1a3ffd32d0ea6917e1e6fb4ecbffbb77d2
+          - label: current-main
+            ref: main
+    steps:
+      - name: Checkout evidence harness
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+          path: harness
+
+      - name: Checkout OpenClaw candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: openclaw/openclaw
+          ref: ${{ matrix.candidate.ref }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: candidate
+
+      - name: Record exact candidate revision
+        id: candidate
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          {
+            echo "candidate: \`${{ matrix.candidate.label }}\`"
+            echo "candidate ref: \`${{ matrix.candidate.ref }}\`"
+            echo "candidate SHA: \`$sha\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Setup Node environment
+        uses: ./harness/.github/actions/setup-node-env
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          install-bun: "false"
+          install-deps: "false"
+
+      - name: Install candidate dependencies
+        working-directory: candidate
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        working-directory: candidate
+        shell: bash
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Inject browser evidence test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp \
+            harness/ui/src/e2e/issue-104843-scroll-proof.e2e.test.ts \
+            candidate/ui/src/e2e/issue-104843-scroll-proof.e2e.test.ts
+
+      - name: Run recorded browser proof
+        id: proof
+        continue-on-error: true
+        working-directory: candidate
+        env:
+          OPENCLAW_ISSUE_104843_ARTIFACT_DIR: .artifacts/issue-104843-scroll-proof/${{ matrix.candidate.label }}
+          OPENCLAW_ISSUE_104843_CANDIDATE: ${{ matrix.candidate.label }}
+          OPENCLAW_ISSUE_104843_SHA: ${{ steps.candidate.outputs.sha }}
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ".artifacts/issue-104843-scroll-proof/${{ matrix.candidate.label }}"
+          pnpm exec vitest run \
+            --config test/vitest/vitest.ui-e2e.config.ts \
+            --configLoader runner \
+            ui/src/e2e/issue-104843-scroll-proof.e2e.test.ts \
+            2>&1 | tee ".artifacts/issue-104843-scroll-proof/${{ matrix.candidate.label }}/vitest.log"
+
+      - name: Convert Playwright video to MP4
+        if: always()
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=".artifacts/issue-104843-scroll-proof/${{ matrix.candidate.label }}"
+          video="$(find "$root" -maxdepth 1 -type f -name '*.webm' | head -1 || true)"
+          if [[ -n "$video" ]] && command -v ffmpeg >/dev/null 2>&1; then
+            ffmpeg -y -i "$video" -c:v libx264 -pix_fmt yuv420p "$root/browser-proof.mp4" || \
+              echo "MP4 conversion failed; the original Playwright WebM remains available."
+          fi
+
+      - name: Publish proof summary
+        if: always()
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          summary=".artifacts/issue-104843-scroll-proof/${{ matrix.candidate.label }}/summary.md"
+          if [[ -f "$summary" ]]; then
+            cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Evidence summary was not produced; inspect the Vitest log artifact." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload continuous video and geometry evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: issue-104843-${{ matrix.candidate.label }}-${{ steps.candidate.outputs.sha }}
+          path: candidate/.artifacts/issue-104843-scroll-proof/${{ matrix.candidate.label }}/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Preserve browser proof verdict
+        if: always()
+        env:
+          PROOF_OUTCOME: ${{ steps.proof.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$PROOF_OUTCOME" != "success" ]]; then
+            echo "Browser proof failed: Auto-scroll Always did not remain pinned or the harness failed." >&2
+            exit 1
+          fi
