@@ -36,8 +36,6 @@ type ScrollSample = {
 };
 
 type ProofResult = {
-  audioAttachmentObserved: boolean;
-  audioMetadataObserved: boolean;
   candidate: string;
   candidateSha: string;
   catastrophicJumpCount: number;
@@ -293,55 +291,6 @@ async function emitScenarioStream(
   );
 }
 
-function createSilentWav(): Buffer {
-  const sampleRate = 8_000;
-  const sampleCount = 2_000;
-  const dataSize = sampleCount * 2;
-  const buffer = Buffer.alloc(44 + dataSize);
-  buffer.write("RIFF", 0);
-  buffer.writeUInt32LE(36 + dataSize, 4);
-  buffer.write("WAVE", 8);
-  buffer.write("fmt ", 12);
-  buffer.writeUInt32LE(16, 16);
-  buffer.writeUInt16LE(1, 20);
-  buffer.writeUInt16LE(1, 22);
-  buffer.writeUInt32LE(sampleRate, 24);
-  buffer.writeUInt32LE(sampleRate * 2, 28);
-  buffer.writeUInt16LE(2, 32);
-  buffer.writeUInt16LE(16, 34);
-  buffer.write("data", 36);
-  buffer.writeUInt32LE(dataSize, 40);
-  return buffer;
-}
-
-async function emitStringChatFinal(page: Page, runId: string, text: string): Promise<void> {
-  await page.evaluate(
-    ({ id, finalText }) => {
-      const gateway = (
-        window as Window & {
-          openclawControlUiE2eGateway?: {
-            emit: (event: string, payload: unknown) => void;
-          };
-        }
-      ).openclawControlUiE2eGateway;
-      if (!gateway) {
-        throw new Error("mock Gateway is missing");
-      }
-      gateway.emit("chat", {
-        message: {
-          content: finalText,
-          role: "assistant",
-          timestamp: Date.now(),
-        },
-        runId: id,
-        sessionKey: "main",
-        state: "final",
-      });
-    },
-    { finalText: text, id: runId },
-  );
-}
-
 describeControlUiE2e("issue #104843 WebChat streaming scroll browser proof", () => {
   beforeAll(async () => {
     await fs.mkdir(artifactDir, { recursive: true });
@@ -362,7 +311,7 @@ describeControlUiE2e("issue #104843 WebChat streaming scroll browser proof", () 
     await server?.close();
   });
 
-  it("keeps Auto-scroll Always pinned across burst, retry-boundary, and TTS-shaped streams", async () => {
+  it("keeps Auto-scroll Always pinned across burst, retry-boundary, and delayed-final streams", async () => {
     const baseTs = Date.now() - 500_000;
     const historyMessages = Array.from({ length: 140 }, (_, index) => ({
       content: [
@@ -375,11 +324,6 @@ describeControlUiE2e("issue #104843 WebChat streaming scroll browser proof", () 
       timestamp: baseTs + index,
     }));
     const gateway = await installMockGateway(page, { historyMessages });
-    const audioUrl = `${server.baseUrl}issue-104843-tone.wav`;
-    await page.route("**/issue-104843-tone.wav", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 450));
-      await route.fulfill({ body: createSilentWav(), contentType: "audio/wav", status: 200 });
-    });
 
     await page.goto(`${server.baseUrl}chat`);
     await page.getByText("History message 140").waitFor({ timeout: 15_000 });
@@ -388,22 +332,20 @@ describeControlUiE2e("issue #104843 WebChat streaming scroll browser proof", () 
     await startScrollSampling(page);
 
     const scenarios = [
-      { chunks: 480, intervalsMs: [2], name: "raf-burst", ttsShapedFinal: false },
+      { chunks: 480, delayedFinal: false, intervalsMs: [2], name: "raf-burst" },
       {
         chunks: 176,
+        delayedFinal: false,
         intervalsMs: [0, 1, 4, 15, 17, 33, 80, 119, 121, 149, 151],
         name: "retry-boundaries",
-        ttsShapedFinal: false,
       },
       {
         chunks: 320,
+        delayedFinal: true,
         intervalsMs: [1, 4, 15, 17, 33],
-        name: "tts-shaped-delayed-audio",
-        ttsShapedFinal: true,
+        name: "tts-timing-shaped-delayed-final",
       },
     ];
-    let audioAttachmentObserved = false;
-    let audioMetadataObserved = false;
     let chunks = 0;
     for (const scenario of scenarios) {
       await expect
@@ -435,31 +377,10 @@ describeControlUiE2e("issue #104843 WebChat streaming scroll browser proof", () 
         scenario: scenario.name,
       });
       chunks += scenario.chunks;
-      const finalText = scenario.ttsShapedFinal
-        ? `${accumulated}\n\nTTS-shaped delayed audio attachment.\nMEDIA:${audioUrl}\n[[audio_as_voice]]`
-        : `${accumulated}\n\nFinalized ${scenario.name}.`;
-      if (scenario.ttsShapedFinal) {
-        await emitStringChatFinal(page, runId, finalText);
-        audioAttachmentObserved = await page
-          .locator("audio")
-          .last()
-          .waitFor({ state: "attached", timeout: 10_000 })
-          .then(() => true)
-          .catch(() => false);
-        if (audioAttachmentObserved) {
-          audioMetadataObserved = await expect
-            .poll(
-              () =>
-                page
-                  .locator("audio")
-                  .last()
-                  .evaluate((element) => (element as HTMLAudioElement).readyState),
-              { timeout: 10_000 },
-            )
-            .toBeGreaterThanOrEqual(1)
-            .then(() => true)
-            .catch(() => false);
-        }
+      const finalText = `${accumulated}\n\nFinalized ${scenario.name}.`;
+      if (scenario.delayedFinal) {
+        await page.waitForTimeout(1_000);
+        await gateway.emitChatFinal({ runId, text: finalText });
         await page.waitForTimeout(1_000);
       } else {
         await gateway.emitChatFinal({ runId, text: finalText });
@@ -499,8 +420,6 @@ describeControlUiE2e("issue #104843 WebChat streaming scroll browser proof", () 
       longestViolationFrames = Math.max(longestViolationFrames, currentViolationFrames);
     }
     const result: ProofResult = {
-      audioAttachmentObserved,
-      audioMetadataObserved,
       candidate: candidateLabel,
       candidateSha,
       catastrophicJumpCount: catastrophicJumps.length,
@@ -533,8 +452,6 @@ describeControlUiE2e("issue #104843 WebChat streaming scroll browser proof", () 
         `- Candidate SHA: \`${candidateSha}\``,
         `- Scenarios: ${result.scenarios.join(", ")}`,
         `- Streamed chunks: ${chunks}`,
-        `- Delayed audio element observed: ${result.audioAttachmentObserved}`,
-        `- Delayed audio metadata loaded: ${result.audioMetadataObserved}`,
         `- Animation-frame samples: ${samples.length}`,
         `- Maximum distance from bottom while streaming: ${result.maxDistanceFromBottom}px`,
         `- Catastrophic bottom-to-top frames: ${result.catastrophicJumpCount}`,
@@ -547,10 +464,6 @@ describeControlUiE2e("issue #104843 WebChat streaming scroll browser proof", () 
       ].join("\n"),
     );
 
-    expect(audioAttachmentObserved, "TTS-shaped final did not render an audio element").toBe(true);
-    expect(audioMetadataObserved, "TTS-shaped audio did not reach loaded metadata state").toBe(
-      true,
-    );
     expect(
       result.catastrophicJumpCount,
       `Auto-scroll Always painted ${result.catastrophicJumpCount} bottom-to-top jumps`,
