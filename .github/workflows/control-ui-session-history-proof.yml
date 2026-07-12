@@ -1,0 +1,233 @@
+name: Issue 104544 Current Source History Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact OpenClaw patch commit to verify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-104544-current-source-history-${{ github.event.inputs.target_sha }}
+  cancel-in-progress: true
+
+jobs:
+  proof:
+    name: Exact-head gateway and Control UI proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      TARGET_SHA: ${{ github.event.inputs.target_sha }}
+    steps:
+      - name: Checkout proof harness
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact patch head
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "TARGET_SHA must be a 40-character commit SHA" >&2
+            exit 1
+          fi
+          git checkout --detach "$TARGET_SHA"
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          echo "Exact patch head: \`$TARGET_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v6
+        with:
+          node-version: 24.x
+          package-manager-cache: false
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+
+      - name: Run focused regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/run-vitest.mjs run \
+            src/infra/outbound/message-action-runner.core-send.test.ts \
+            src/agents/embedded-agent-message-tool-source-reply.test.ts \
+            src/gateway/server.chat.gateway-server-chat.test.ts \
+            --maxWorkers=1
+
+      - name: Install Playwright Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/ensure-playwright-chromium.mjs
+          corepack pnpm --dir ui exec playwright install --with-deps chromium
+
+      - name: Capture exact-head Control UI behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proof-artifacts ui/.proof
+          cat > ui/.proof/issue-104544-current-source-history-proof.ts <<'TS'
+          import fs from "node:fs/promises";
+          import { chromium } from "playwright";
+          import { projectChatDisplayMessages } from "../../src/gateway/chat-display-projection.ts";
+          import {
+            installMockGateway,
+            startControlUiE2eServer,
+          } from "../src/test-helpers/control-ui-e2e.ts";
+
+          const sourceReply = "Visible reply delivered to Telegram.";
+          const laterFinal = "A later run produced this different final.";
+          const rawHistory = [
+            {
+              role: "user",
+              content: [{ type: "text", text: "Reply in this Telegram chat." }],
+              timestamp: 1,
+            },
+            {
+              role: "assistant",
+              content: [
+                {
+                  type: "toolCall",
+                  id: "call-message-current-source",
+                  name: "message",
+                  arguments: {
+                    action: "send",
+                    channel: "telegram",
+                    target: "8455538490",
+                    message: sourceReply,
+                  },
+                },
+              ],
+              timestamp: 2,
+            },
+            {
+              role: "toolResult",
+              toolName: "message",
+              toolCallId: "call-message-current-source",
+              content: { ok: true, messageId: "24269", chatId: "8455538490" },
+              details: {
+                ok: true,
+                messageId: "24269",
+                chatId: "8455538490",
+                sourceReplyRoute: "current-source",
+              },
+              timestamp: 3,
+            },
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "NO_REPLY" }],
+              timestamp: 4,
+            },
+            {
+              role: "user",
+              content: [{ type: "text", text: "Continue." }],
+              timestamp: 5,
+            },
+            {
+              role: "assistant",
+              content: [{ type: "text", text: laterFinal }],
+              timestamp: 6,
+            },
+          ];
+
+          const projectedHistory = projectChatDisplayMessages(rawHistory);
+          const projectedSourceReply = projectedHistory.find((message) => {
+            const mirror = message.openclawMessageToolMirror as
+              | Record<string, unknown>
+              | undefined;
+            return mirror?.sourceReplyRoute === "current-source";
+          });
+          if (!projectedSourceReply) {
+            throw new Error("Gateway projection omitted the confirmed current-source send");
+          }
+
+          const server = await startControlUiE2eServer();
+          const browser = await chromium.launch({ headless: true });
+          try {
+            const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+            await installMockGateway(page, {
+              assistantAgentId: "main",
+              assistantName: "OpenClaw",
+              defaultAgentId: "main",
+              featureMethods: ["chat.metadata", "chat.startup"],
+              historyMessages: projectedHistory,
+              sessionKey: "agent:main:telegram:direct:8455538490",
+            });
+            await page.goto(`${server.baseUrl}chat`, { waitUntil: "networkidle" });
+
+            const sourceBubble = page.locator(".chat-group.assistant").filter({
+              hasText: sourceReply,
+            });
+            const laterBubble = page.locator(".chat-group.assistant").filter({
+              hasText: laterFinal,
+            });
+            await sourceBubble.waitFor({ state: "visible", timeout: 30_000 });
+            await laterBubble.waitFor({ state: "visible", timeout: 30_000 });
+
+            const renderedAssistantText = await page
+              .locator(".chat-group.assistant .chat-bubble")
+              .allTextContents();
+            const sourceIndex = renderedAssistantText.findIndex((text) => text.includes(sourceReply));
+            const laterIndex = renderedAssistantText.findIndex((text) => text.includes(laterFinal));
+            if (sourceIndex < 0 || laterIndex < 0 || sourceIndex >= laterIndex) {
+              throw new Error(
+                `Unexpected rendered order: ${JSON.stringify(renderedAssistantText)}`,
+              );
+            }
+
+            await page.screenshot({
+              path: "proof-artifacts/issue-104544-current-source-history.png",
+              fullPage: true,
+            });
+            await fs.writeFile(
+              "proof-artifacts/issue-104544-current-source-history.json",
+              `${JSON.stringify(
+                {
+                  targetSha: process.env.TARGET_SHA,
+                  sourceReply,
+                  laterFinal,
+                  sourceIndex,
+                  laterIndex,
+                  renderedAssistantText,
+                  projectedSourceReply,
+                },
+                null,
+                2,
+              )}\n`,
+            );
+          } finally {
+            await browser.close();
+            await server.close();
+          }
+          TS
+
+          TARGET_SHA="$TARGET_SHA" node --import tsx \
+            ui/.proof/issue-104544-current-source-history-proof.ts
+
+          {
+            echo "### Issue #104544 current-source history proof"
+            echo
+            echo "- Exact patch head: \`$TARGET_SHA\`"
+            echo "- Gateway projection preserved the confirmed source reply."
+            echo "- Control UI rendered the source reply before the distinct later final."
+            echo "- Screenshot: \`issue-104544-current-source-history.png\`"
+            echo "- Structured evidence: \`issue-104544-current-source-history.json\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload proof artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: issue-104544-current-source-history-${{ env.TARGET_SHA }}
+          path: proof-artifacts/
+          if-no-files-found: error
