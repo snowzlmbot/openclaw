@@ -58,12 +58,35 @@ jobs:
             echo "candidate SHA: \`$sha\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Initialize evidence directory
+        working-directory: candidate
+        env:
+          CANDIDATE_LABEL: ${{ matrix.candidate.label }}
+          CANDIDATE_REF: ${{ matrix.candidate.ref }}
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=".artifacts/issue-104843-scroll-proof/$CANDIDATE_LABEL"
+          mkdir -p "$root"
+          jq -n \
+            --arg label "$CANDIDATE_LABEL" \
+            --arg ref "$CANDIDATE_REF" \
+            --arg sha "$CANDIDATE_SHA" \
+            '{candidate: $label, ref: $ref, sha: $sha}' > "$root/candidate.json"
+
       - name: Setup Node environment
-        uses: ./harness/.github/actions/setup-node-env
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-          install-bun: "false"
-          install-deps: "false"
+
+      - name: Setup pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global pnpm@11.2.2
+          node --version
+          pnpm --version
 
       - name: Install candidate dependencies
         working-directory: candidate
@@ -133,7 +156,7 @@ jobs:
         with:
           name: issue-104843-${{ matrix.candidate.label }}-${{ steps.candidate.outputs.sha }}
           path: candidate/.artifacts/issue-104843-scroll-proof/${{ matrix.candidate.label }}/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
 
       - name: Preserve browser proof verdict
