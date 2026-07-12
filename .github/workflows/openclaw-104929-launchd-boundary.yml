@@ -1,0 +1,32 @@
+name: OpenClaw 104929 launchd boundary proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/openclaw-104929-launchd-boundary.yml"
+      - "scripts/proof/openclaw-104929-launchd-boundary.py"
+
+permissions:
+  contents: read
+
+jobs:
+  launchd-boundary:
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove launchd cannot contain new-session and double-fork descendants
+        run: |
+          mkdir -p proof-artifacts/openclaw-104929-launchd-boundary
+          python3 scripts/proof/openclaw-104929-launchd-boundary.py \
+            | tee proof-artifacts/openclaw-104929-launchd-boundary/result.json
+
+      - name: Upload process-table evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openclaw-104929-launchd-boundary
+          path: proof-artifacts/openclaw-104929-launchd-boundary
+          if-no-files-found: error
