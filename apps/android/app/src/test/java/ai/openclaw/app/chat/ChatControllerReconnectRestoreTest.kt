@@ -92,6 +92,37 @@ class ChatControllerReconnectRestoreTest {
 
   @Test
   @OptIn(ExperimentalCoroutinesApi::class)
+  fun agentSelectionAcknowledgesUnreadDeviceSession() =
+    runTest {
+      val sessionKey = "agent:main:node-device"
+      val gateway = ScriptedGateway(json)
+      gateway.respondWith(
+        "sessions.describe",
+        """{"session":{"key":"$sessionKey","label":"OpenClaw App · Pixel · device"}}""",
+      )
+      gateway.respondWith("sessions.patch", """{"ok":true,"key":"$sessionKey"}""")
+      gateway.respondWith("chat.history", historyResponse("session-1", emptyList()))
+      val controller = newScopedController(gateway)
+      controller.handleGatewayEvent(
+        "sessions.changed",
+        """{"reason":"patch","sessionKey":"$sessionKey","session":{"key":"$sessionKey","unread":true}}""",
+      )
+
+      controller.prepareAndSelectMainSessionKey(sessionKey)
+      controller.onGatewayConnected(MainSessionBinding(sessionKey, "OpenClaw App · Pixel · device"))
+      runCurrent()
+
+      val patchParams =
+        gateway.calls
+          .first { it.method == "sessions.patch" }
+          .paramsJson
+          .orEmpty()
+      assertTrue(patchParams.contains("\"key\":\"$sessionKey\""))
+      assertTrue(patchParams.contains("\"unread\":false"))
+    }
+
+  @Test
+  @OptIn(ExperimentalCoroutinesApi::class)
   fun reconnectRevalidatesWithoutOverwritingExistingLabel() =
     runTest {
       val sessionKey = "agent:main:node-device"

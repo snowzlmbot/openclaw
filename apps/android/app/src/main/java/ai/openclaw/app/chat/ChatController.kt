@@ -440,6 +440,9 @@ class ChatController internal constructor(
 
   /** Selects a newly chosen agent's main session without racing history ahead of adoption. */
   internal fun prepareAndSelectMainSessionKey(mainSessionKey: String) {
+    val selectedKey = mainSessionKey.trim()
+    if (selectedKey.isEmpty()) return
+    prepareSessionSelection(selectedKey)
     bindMainSessionKey(mainSessionKey, loadHistory = false)
     val key = normalizeRequestedSessionKey(mainSessionKey)
     if (_sessionKey.value != key) beginHistoryLoad(key, clearMessages = true)
@@ -802,16 +805,20 @@ class ChatController internal constructor(
   fun switchSession(sessionKey: String) {
     val key = normalizeRequestedSessionKey(sessionKey)
     if (key.isEmpty()) return
-    if (key != unreadPatchSessionKey) {
-      unreadPatchSessionKey = key
-      unreadPatchRequested = false
-    }
-    acknowledgeUnreadIfNeeded(key, _sessions.value.firstOrNull { it.key == key })
+    prepareSessionSelection(key)
     if (key == _sessionKey.value) return
     val generation = beginHistoryLoad(key, clearMessages = true)
     scope.launch {
       bootstrap(sessionKey = key, generation = generation, forceHealth = true, refreshSessions = false)
     }
+  }
+
+  private fun prepareSessionSelection(key: String) {
+    if (key != unreadPatchSessionKey) {
+      unreadPatchSessionKey = key
+      unreadPatchRequested = false
+    }
+    acknowledgeUnreadIfNeeded(key, _sessions.value.firstOrNull { it.key == key })
   }
 
   private fun beginHistoryLoad(
