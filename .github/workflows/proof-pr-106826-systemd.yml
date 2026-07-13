@@ -1,17 +1,17 @@
-name: Proof 106379 systemd crash-loop convergence
+name: Proof PR 106826 systemd crash-loop convergence
 
 on:
   push:
     branches:
-      - evidence/106379-systemd-proof
+      - evidence/pr-106826-systemd-proof
   workflow_dispatch:
 
 permissions:
   contents: read
 
 env:
-  BEFORE_SHA: 171fabef24cf774fe63e04ddc5dd60402d4388b7
-  AFTER_SHA: 3e074ee50c9df1f017009955c5154038f7e5af11
+  BEFORE_SHA: 103d9ceb5e88067a9228488b385d37c7a23d04bf
+  AFTER_SHA: 144614340832f69ce0dd2894fff32c9d6ec00f31
 
 jobs:
   focused-tests:
@@ -33,7 +33,10 @@ jobs:
       - name: Run focused regression tests
         run: |
           set -euo pipefail
-          pnpm test src/gateway/server-startup-config.secrets.test.ts
+          pnpm test \
+            src/gateway/server-startup-config.secrets.test.ts \
+            src/gateway/server-startup-secret-surfaces.test.ts \
+            src/gateway/server-startup-config.breaker-secrets.integration.test.ts
           pnpm test \
             src/infra/gateway-boot-lifecycle.test.ts \
             src/gateway/server-channels.test.ts \
@@ -45,9 +48,15 @@ jobs:
         run: |
           set -euo pipefail
           pnpm check:changed --base "$BEFORE_SHA" --head "$AFTER_SHA" -- \
+            docs/cli/secrets.md \
+            docs/gateway/index.md \
+            src/gateway/server-aux-handlers.ts \
+            src/gateway/server-aux-handlers.test.ts \
             src/gateway/server-startup-config.ts \
             src/gateway/server.impl.ts \
-            src/gateway/server-startup-config.secrets.test.ts
+            src/gateway/server-startup-config.breaker-secrets.integration.test.ts \
+            src/gateway/server-startup-secret-surfaces.ts \
+            src/gateway/server-startup-secret-surfaces.test.ts
 
   systemd-proof:
     name: systemd ${{ matrix.label }}
@@ -58,15 +67,15 @@ jobs:
       matrix:
         include:
           - label: before-channel-secret
-            ref: 171fabef24cf774fe63e04ddc5dd60402d4388b7
+            ref: 103d9ceb5e88067a9228488b385d37c7a23d04bf
             scenario: channel
             expected: unavailable
           - label: after-channel-secret
-            ref: 3e074ee50c9df1f017009955c5154038f7e5af11
+            ref: 144614340832f69ce0dd2894fff32c9d6ec00f31
             scenario: channel
             expected: converged
           - label: after-gateway-auth-secret
-            ref: 3e074ee50c9df1f017009955c5154038f7e5af11
+            ref: 144614340832f69ce0dd2894fff32c9d6ec00f31
             scenario: gateway-auth
             expected: unavailable
     steps:
@@ -114,6 +123,7 @@ jobs:
           artifact_dir="$RUNNER_TEMP/proof-artifacts"
           state_dir="$RUNNER_TEMP/openclaw-state"
           config_path="$state_dir/openclaw.json"
+          secret_path="$state_dir/PROOF_MISSING_TELEGRAM_TOKEN.json"
           unit="openclaw-gateway.service"
           mkdir -p "$artifact_dir" "$state_dir"
           chmod 700 "$state_dir"
@@ -125,7 +135,15 @@ jobs:
           if [[ "$PROOF_SCENARIO" == "channel" ]]; then
             cat > "$config_path" <<EOF
           {
-            "secrets": { "providers": { "proof-env": { "source": "env" } } },
+            "secrets": {
+              "providers": {
+                "proof-file": {
+                  "source": "file",
+                  "path": "${secret_path}",
+                  "mode": "json"
+                }
+              }
+            },
             "gateway": {
               "mode": "local",
               "bind": "loopback",
@@ -138,9 +156,9 @@ jobs:
               "telegram": {
                 "enabled": true,
                 "botToken": {
-                  "source": "env",
-                  "provider": "proof-env",
-                  "id": "PROOF_MISSING_TELEGRAM_TOKEN"
+                  "source": "file",
+                  "provider": "proof-file",
+                  "id": "/telegramToken"
                 }
               }
             },
@@ -205,6 +223,18 @@ jobs:
               fi
               sleep 1
             done
+
+            printf '%s\n' '{"telegramToken":"proof-restored-token"}' > "$secret_path"
+            chmod 600 "$secret_path"
+            node dist/entry.js secrets reload \
+              --url "ws://127.0.0.1:${port}" \
+              --token "$token" \
+              --json > "$artifact_dir/secrets-reload.json"
+            node dist/entry.js gateway call channels.status \
+              --params '{"probe":false}' \
+              --url "ws://127.0.0.1:${port}" \
+              --token "$token" \
+              --json > "$artifact_dir/channels-status.json"
           else
             sleep 45
           fi
@@ -241,6 +271,11 @@ jobs:
             echo "post_breaker_missing_secret_failures=$post_breaker_missing_count"
             echo "restarts_before_stability_window=$restarts_before"
             echo "restarts_after_stability_window=$restarts_after"
+            if [[ "$PROOF_EXPECTED" == "converged" ]]; then
+              echo "post_repair_secrets_reload=success"
+              echo "post_repair_channel_config_visible=success"
+              echo "post_repair_channel_autostart=suppressed"
+            fi
             echo "systemd_version=$(systemctl --version | head -1)"
             echo "runner_image=${ImageOS:-unknown}"
           } | tee "$artifact_dir/summary.txt"
@@ -268,6 +303,9 @@ jobs:
               --require-rpc \
               --timeout 30000 \
               --json >/dev/null
+            grep -q 'telegram' "$artifact_dir/channels-status.json"
+            grep -q 'configured' "$artifact_dir/channels-status.json"
+            grep -q 'not-running' "$artifact_dir/channels-status.json"
           else
             test "$post_breaker_missing_count" -ge 1
             if curl -fsS --max-time 2 "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1; then
@@ -280,7 +318,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: proof-106379-${{ matrix.label }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: proof-pr-106826-${{ matrix.label }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/proof-artifacts
           if-no-files-found: warn
           retention-days: 30
