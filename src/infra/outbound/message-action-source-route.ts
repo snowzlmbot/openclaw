@@ -16,7 +16,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-export function markCurrentSourceReplyResult<T extends SendActionResult>(result: T): T {
+function markCurrentSourceReplyResult<T extends SendActionResult>(result: T): T {
   if (result.kind !== "send") {
     return result;
   }
@@ -38,7 +38,7 @@ export function markCurrentSourceReplyResult<T extends SendActionResult>(result:
   } as T;
 }
 
-export type CurrentSourceReplyRouteParams = Parameters<typeof isCurrentSourceReplyRoute>[0];
+type CurrentSourceReplyRouteParams = Parameters<typeof isCurrentSourceReplyRoute>[0];
 
 export function markCurrentSourceReplyResultIfNeeded<T extends SendActionResult>(
   result: T,
@@ -101,7 +101,7 @@ export function shouldApplyImplicitSourceReplySendPolicy(params: {
   );
 }
 
-export function isCurrentSourceReplyRoute(params: {
+function isCurrentSourceReplyRoute(params: {
   dryRun: boolean;
   currentChannelProvider: unknown;
   actionChannel: unknown;
