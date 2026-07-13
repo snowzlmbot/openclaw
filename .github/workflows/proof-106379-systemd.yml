@@ -1,0 +1,286 @@
+name: Proof 106379 systemd crash-loop convergence
+
+on:
+  push:
+    branches:
+      - evidence/106379-systemd-proof
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BEFORE_SHA: 171fabef24cf774fe63e04ddc5dd60402d4388b7
+  AFTER_SHA: 3e074ee50c9df1f017009955c5154038f7e5af11
+
+jobs:
+  focused-tests:
+    name: Focused and adjacent regression tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out patched head
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ env.AFTER_SHA }}
+          fetch-depth: 3
+
+      - name: Set up Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          install-bun: "false"
+
+      - name: Run focused regression tests
+        run: |
+          set -euo pipefail
+          pnpm test src/gateway/server-startup-config.secrets.test.ts
+          pnpm test \
+            src/infra/gateway-boot-lifecycle.test.ts \
+            src/gateway/server-channels.test.ts \
+            src/gateway/server-aux-handlers.test.ts \
+            src/gateway/server-reload-handlers.test.ts \
+            src/gateway/server-methods/channels.start.test.ts
+
+      - name: Run changed-file gate
+        run: |
+          set -euo pipefail
+          pnpm check:changed --base "$BEFORE_SHA" --head "$AFTER_SHA" -- \
+            src/gateway/server-startup-config.ts \
+            src/gateway/server.impl.ts \
+            src/gateway/server-startup-config.secrets.test.ts
+
+  systemd-proof:
+    name: systemd ${{ matrix.label }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: before-channel-secret
+            ref: 171fabef24cf774fe63e04ddc5dd60402d4388b7
+            scenario: channel
+            expected: unavailable
+          - label: after-channel-secret
+            ref: 3e074ee50c9df1f017009955c5154038f7e5af11
+            scenario: channel
+            expected: converged
+          - label: after-gateway-auth-secret
+            ref: 3e074ee50c9df1f017009955c5154038f7e5af11
+            scenario: gateway-auth
+            expected: unavailable
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ matrix.ref }}
+          fetch-depth: 1
+
+      - name: Set up Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          install-bun: "false"
+
+      - name: Build exact candidate
+        run: pnpm build
+
+      - name: Prepare real systemd user session
+        shell: bash
+        run: |
+          set -euo pipefail
+          user="$(id -un)"
+          uid="$(id -u)"
+          test "$(ps -p 1 -o comm= | xargs)" = systemd
+          sudo systemctl is-active --quiet systemd-logind.service
+          sudo loginctl enable-linger "$user"
+          sudo systemctl start "user@${uid}.service"
+          runtime_dir="$(loginctl show-user "$user" --property=RuntimePath --value)"
+          test -S "$runtime_dir/systemd/private"
+          echo "XDG_RUNTIME_DIR=$runtime_dir" >> "$GITHUB_ENV"
+          if [[ -S "$runtime_dir/bus" ]]; then
+            echo "DBUS_SESSION_BUS_ADDRESS=unix:path=${runtime_dir}/bus" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run generated-service convergence proof
+        id: proof
+        shell: bash
+        env:
+          PROOF_SCENARIO: ${{ matrix.scenario }}
+          PROOF_EXPECTED: ${{ matrix.expected }}
+          PROOF_REF: ${{ matrix.ref }}
+          PROOF_LABEL: ${{ matrix.label }}
+        run: |
+          set -euo pipefail
+          artifact_dir="$RUNNER_TEMP/proof-artifacts"
+          state_dir="$RUNNER_TEMP/openclaw-state"
+          config_path="$state_dir/openclaw.json"
+          unit="openclaw-gateway.service"
+          mkdir -p "$artifact_dir" "$state_dir"
+          chmod 700 "$state_dir"
+
+          port="$(node -e "const n=require('node:net');const s=n.createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})")"
+          token="proof-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RANDOM}"
+          echo "::add-mask::$token"
+
+          if [[ "$PROOF_SCENARIO" == "channel" ]]; then
+            cat > "$config_path" <<EOF
+          {
+            "secrets": { "providers": { "proof-env": { "source": "env" } } },
+            "gateway": {
+              "mode": "local",
+              "bind": "loopback",
+              "port": ${port},
+              "auth": { "mode": "token", "token": "${token}" },
+              "controlUi": { "enabled": false },
+              "tailscale": { "mode": "off" }
+            },
+            "channels": {
+              "telegram": {
+                "enabled": true,
+                "botToken": {
+                  "source": "env",
+                  "provider": "proof-env",
+                  "id": "PROOF_MISSING_TELEGRAM_TOKEN"
+                }
+              }
+            },
+            "plugins": { "enabled": true, "entries": { "telegram": { "enabled": true } } },
+            "cron": { "enabled": false },
+            "browser": { "enabled": false }
+          }
+          EOF
+          else
+            cat > "$config_path" <<EOF
+          {
+            "secrets": { "providers": { "proof-env": { "source": "env" } } },
+            "gateway": {
+              "mode": "local",
+              "bind": "loopback",
+              "port": ${port},
+              "auth": { "mode": "token", "token": "${token}" },
+              "controlUi": { "enabled": false },
+              "tailscale": { "mode": "off" }
+            },
+            "cron": { "enabled": false },
+            "browser": { "enabled": false }
+          }
+          EOF
+          fi
+          chmod 600 "$config_path"
+
+          cleanup() {
+            systemctl --user stop "$unit" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          export OPENCLAW_STATE_DIR="$state_dir"
+          export OPENCLAW_CONFIG_PATH="$config_path"
+          export OPENCLAW_GATEWAY_PORT="$port"
+          export OPENCLAW_SKIP_CRON=1
+          node dist/entry.js gateway install --force --json > "$artifact_dir/install.json"
+          if [[ "$PROOF_SCENARIO" == "gateway-auth" ]]; then
+            node -e '
+              const fs = require("node:fs");
+              const configPath = process.env.OPENCLAW_CONFIG_PATH;
+              const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+              config.gateway.auth.token = {
+                source: "env",
+                provider: "proof-env",
+                id: "PROOF_MISSING_GATEWAY_TOKEN",
+              };
+              fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+            '
+          fi
+          systemctl --user daemon-reload
+          systemctl --user reset-failed "$unit" || true
+          started_at="$(date --iso-8601=seconds)"
+          systemctl --user start "$unit"
+
+          if [[ "$PROOF_EXPECTED" == "converged" ]]; then
+            for _ in $(seq 1 120); do
+              if systemctl --user is-active --quiet "$unit" && \
+                curl -fsS "http://127.0.0.1:${port}/healthz" >/dev/null && \
+                curl -fsS "http://127.0.0.1:${port}/readyz" >/dev/null; then
+                break
+              fi
+              sleep 1
+            done
+          else
+            sleep 45
+          fi
+
+          journalctl --user -u "$unit" --since "$started_at" --no-pager > "$artifact_dir/journal.raw"
+          missing_id="PROOF_MISSING_TELEGRAM_TOKEN"
+          if [[ "$PROOF_SCENARIO" == "gateway-auth" ]]; then
+            missing_id="PROOF_MISSING_GATEWAY_TOKEN"
+          fi
+          missing_count="$(grep -c "$missing_id" "$artifact_dir/journal.raw" || true)"
+          breaker_count="$(grep -c 'restart-loop breaker tripped' "$artifact_dir/journal.raw" || true)"
+          post_breaker_missing_count="$(awk -v id="$missing_id" '
+            /restart-loop breaker tripped/ { breaker_seen = 1 }
+            breaker_seen && index($0, id) { missing_count++ }
+            END { print missing_count + 0 }
+          ' "$artifact_dir/journal.raw")"
+          restarts_before="$(systemctl --user show "$unit" -p NRestarts --value)"
+          sleep 12
+          restarts_after="$(systemctl --user show "$unit" -p NRestarts --value)"
+          active_state="$(systemctl --user show "$unit" -p ActiveState --value)"
+          sub_state="$(systemctl --user show "$unit" -p SubState --value)"
+          result="$(systemctl --user show "$unit" -p Result --value)"
+
+          {
+            echo "label=$PROOF_LABEL"
+            echo "scenario=$PROOF_SCENARIO"
+            echo "tested_sha=$(git rev-parse HEAD)"
+            echo "expected=$PROOF_EXPECTED"
+            echo "active_state=$active_state"
+            echo "sub_state=$sub_state"
+            echo "result=$result"
+            echo "missing_secret_failures=$missing_count"
+            echo "breaker_events=$breaker_count"
+            echo "post_breaker_missing_secret_failures=$post_breaker_missing_count"
+            echo "restarts_before_stability_window=$restarts_before"
+            echo "restarts_after_stability_window=$restarts_after"
+            echo "systemd_version=$(systemctl --version | head -1)"
+            echo "runner_image=${ImageOS:-unknown}"
+          } | tee "$artifact_dir/summary.txt"
+
+          sed \
+            -e "s#${GITHUB_WORKSPACE}#<workspace>#g" \
+            -e "s#${RUNNER_TEMP}#<runner-temp>#g" \
+            -e "s#${HOME}#<home>#g" \
+            -e "s#${token}#<redacted>#g" \
+            "$artifact_dir/journal.raw" > "$artifact_dir/journal.txt"
+          rm "$artifact_dir/journal.raw" "$artifact_dir/install.json"
+
+          test "$missing_count" -ge 3
+          test "$breaker_count" -ge 1
+          if [[ "$PROOF_EXPECTED" == "converged" ]]; then
+            test "$post_breaker_missing_count" -eq 0
+            test "$active_state" = "active"
+            test "$sub_state" = "running"
+            test "$restarts_before" -eq "$restarts_after"
+            curl -fsS "http://127.0.0.1:${port}/healthz" >/dev/null
+            curl -fsS "http://127.0.0.1:${port}/readyz" >/dev/null
+            node dist/entry.js gateway status \
+              --url "ws://127.0.0.1:${port}" \
+              --token "$token" \
+              --require-rpc \
+              --timeout 30000 \
+              --json >/dev/null
+          else
+            test "$post_breaker_missing_count" -ge 1
+            if curl -fsS --max-time 2 "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1; then
+              echo "unexpectedly reached the control plane" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Upload sanitized proof
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: proof-106379-${{ matrix.label }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/proof-artifacts
+          if-no-files-found: warn
+          retention-days: 30
