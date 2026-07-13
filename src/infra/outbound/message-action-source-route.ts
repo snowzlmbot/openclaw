@@ -1,5 +1,5 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import type { AgentToolResult } from "../../agents/tools/common.js";
+import type { AgentToolResult } from "../../agents/runtime/index.js";
 import { normalizeAccountId } from "../../routing/session-key.js";
 
 const CURRENT_SOURCE_REPLY_ROUTE = "current-source";
