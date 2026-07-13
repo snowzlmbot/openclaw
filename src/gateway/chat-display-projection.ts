@@ -28,6 +28,15 @@ import { isOpenClawDeliveryMirrorAssistantMessage } from "../shared/transcript-o
 import { stripInlineDirectiveTagsForDisplay } from "../utils/directive-tags.js";
 import { stripEnvelopeFromMessages } from "./chat-sanitize.js";
 import { isSuppressedControlReplyText } from "./control-reply-text.js";
+import {
+  hasDryRunMessageToolResultValue,
+  hasSuppressedMessageToolResultValue,
+  isDryRunMessageToolRecord,
+  readMessageToolResultCallId,
+  readMessageToolResultName,
+  readMessageToolResultOkValue,
+  readMessageToolSourceReplyRoute,
+} from "./message-tool-result-status.js";
 
 export const DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS = 8_000;
 
@@ -865,17 +874,6 @@ function readMessageToolVisibleText(args: Record<string, unknown>): string | und
   return undefined;
 }
 
-function isDryRunMessageToolRecord(record: Record<string, unknown>): boolean {
-  if (record.dryRun === true || record.dry_run === true) {
-    return true;
-  }
-  const deliveryStatus =
-    normalizeOptionalString(record.deliveryStatus) ??
-    normalizeOptionalString(record.delivery_status) ??
-    normalizeOptionalString(record.status);
-  return deliveryStatus?.toLowerCase() === "dry_run";
-}
-
 function extractMessageToolVisibleReplies(
   message: Record<string, unknown>,
 ): Array<Omit<PendingMessageToolVisibleReply, "anchor" | "succeeded">> {
@@ -932,112 +930,6 @@ function isRenderableAssistantDisplayMessage(message: Record<string, unknown>): 
   return text !== undefined && !isSuppressedControlReplyText(text);
 }
 
-function readMessageToolResultName(message: Record<string, unknown>): string | undefined {
-  return (
-    normalizeOptionalString(message.toolName) ??
-    normalizeOptionalString(message.tool_name) ??
-    normalizeOptionalString(message.name) ??
-    normalizeOptionalString(message.tool)
-  );
-}
-
-function readMessageToolResultCallId(message: Record<string, unknown>): string | undefined {
-  return (
-    normalizeOptionalString(message.toolCallId) ??
-    normalizeOptionalString(message.tool_call_id) ??
-    normalizeOptionalString(message.callId) ??
-    normalizeOptionalString(message.call_id) ??
-    normalizeOptionalString(message.id)
-  );
-}
-
-function readToolResultOkValue(value: unknown): boolean | undefined {
-  if (typeof value === "boolean") {
-    return value;
-  }
-  const record = readMaybeJsonRecord(value);
-  if (record && typeof record.ok === "boolean") {
-    return record.ok;
-  }
-  if (Array.isArray(value)) {
-    for (const block of value) {
-      const blockOk = readToolResultOkValue(block);
-      if (blockOk !== undefined) {
-        return blockOk;
-      }
-      const recordBlock = readRecord(block);
-      if (typeof recordBlock?.text === "string") {
-        const textOk = readToolResultOkValue(recordBlock.text);
-        if (textOk !== undefined) {
-          return textOk;
-        }
-      }
-      if (typeof recordBlock?.content === "string") {
-        const contentOk = readToolResultOkValue(recordBlock.content);
-        if (contentOk !== undefined) {
-          return contentOk;
-        }
-      }
-    }
-  }
-  return undefined;
-}
-
-function hasDryRunToolResultValue(value: unknown): boolean {
-  const record = readMaybeJsonRecord(value);
-  if (record && isDryRunMessageToolRecord(record)) {
-    return true;
-  }
-  if (!Array.isArray(value)) {
-    return false;
-  }
-  return value.some((block) => {
-    if (hasDryRunToolResultValue(block)) {
-      return true;
-    }
-    const recordBlock = readRecord(block);
-    if (typeof recordBlock?.text === "string" && hasDryRunToolResultValue(recordBlock.text)) {
-      return true;
-    }
-    return (
-      typeof recordBlock?.content === "string" && hasDryRunToolResultValue(recordBlock.content)
-    );
-  });
-}
-
-function hasSuppressedToolResultValue(value: unknown): boolean {
-  const record = readMaybeJsonRecord(value);
-  if (record) {
-    const messageId = normalizeOptionalString(record.messageId)?.toLowerCase();
-    const status =
-      normalizeOptionalString(record.deliveryStatus)?.toLowerCase() ??
-      normalizeOptionalString(record.delivery_status)?.toLowerCase() ??
-      normalizeOptionalString(record.status)?.toLowerCase();
-    if (
-      record.delivered === false ||
-      messageId === "skipped" ||
-      messageId === "suppressed" ||
-      status === "skipped" ||
-      status === "suppressed"
-    ) {
-      return true;
-    }
-  }
-  if (!Array.isArray(value)) {
-    return false;
-  }
-  return value.some((block) => {
-    if (hasSuppressedToolResultValue(block)) {
-      return true;
-    }
-    const blockRecord = readRecord(block);
-    return (
-      hasSuppressedToolResultValue(blockRecord?.text) ||
-      hasSuppressedToolResultValue(blockRecord?.content)
-    );
-  });
-}
-
 function isSuccessfulMessageToolResult(
   message: Record<string, unknown>,
   pending: PendingMessageToolVisibleReply,
@@ -1066,27 +958,27 @@ function isSuccessfulMessageToolResultPayload(message: Record<string, unknown>):
     return false;
   }
   if (
-    hasDryRunToolResultValue(message.result) ||
-    hasDryRunToolResultValue(message.output) ||
-    hasDryRunToolResultValue(message.content) ||
-    hasDryRunToolResultValue(message.text)
+    hasDryRunMessageToolResultValue(message.result) ||
+    hasDryRunMessageToolResultValue(message.output) ||
+    hasDryRunMessageToolResultValue(message.content) ||
+    hasDryRunMessageToolResultValue(message.text)
   ) {
     return false;
   }
   if (
-    hasSuppressedToolResultValue(message.details) ||
-    hasSuppressedToolResultValue(message.result) ||
-    hasSuppressedToolResultValue(message.output) ||
-    hasSuppressedToolResultValue(message.content) ||
-    hasSuppressedToolResultValue(message.text)
+    hasSuppressedMessageToolResultValue(message.details) ||
+    hasSuppressedMessageToolResultValue(message.result) ||
+    hasSuppressedMessageToolResultValue(message.output) ||
+    hasSuppressedMessageToolResultValue(message.content) ||
+    hasSuppressedMessageToolResultValue(message.text)
   ) {
     return false;
   }
   const ok =
-    readToolResultOkValue(message.result) ??
-    readToolResultOkValue(message.output) ??
-    readToolResultOkValue(message.content) ??
-    readToolResultOkValue(message.text);
+    readMessageToolResultOkValue(message.result) ??
+    readMessageToolResultOkValue(message.output) ??
+    readMessageToolResultOkValue(message.content) ??
+    readMessageToolResultOkValue(message.text);
   return ok !== false;
 }
 
@@ -1095,13 +987,6 @@ function readMessageToolSourceReplySink(
 ): "internal-ui" | undefined {
   const details = readRecord(message.details);
   return details?.sourceReplySink === "internal-ui" ? "internal-ui" : undefined;
-}
-
-function readMessageToolSourceReplyRoute(
-  message: Record<string, unknown>,
-): "current-source" | undefined {
-  const details = readRecord(message.details);
-  return details?.sourceReplyRoute === "current-source" ? "current-source" : undefined;
 }
 
 function buildMessageToolVisibleReplyMirror(
