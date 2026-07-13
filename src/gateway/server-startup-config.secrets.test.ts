@@ -1256,11 +1256,13 @@ describe("gateway startup config secret preflight", () => {
     );
   });
 
-  // Breaker suppression — when the persisted crash-loop breaker is tripped,
-  // channel surfaces must be pruned before eager SecretRef projection so an
-  // unavailable channel credential does not block control-plane startup.
-  it("prunes channel surfaces when crash-loop breaker suppression is active", async () => {
-    const prepareRuntimeSecretsSnapshot = vi.fn(async ({ config }) => preparedSnapshot(config));
+  // Breaker suppression preserves the recovery source while excluding channel
+  // assignments from startup SecretRef projection.
+  it("prunes channel assignments when crash-loop breaker suppression is active", async () => {
+    const prepareRuntimeSecretsSnapshot = vi.fn(async ({ config, assignmentConfig }) => ({
+      ...preparedSnapshot(assignmentConfig ?? config),
+      sourceConfig: config,
+    }));
     const activateRuntimeSecrets = runtimeSecretsActivatorForTest({
       prepareRuntimeSecretsSnapshot,
       channelAutostartSuppression: {
@@ -1285,9 +1287,13 @@ describe("gateway startup config secret preflight", () => {
     expect(typeof result.config.gateway).toBe("object");
     const preflightInput = callArg<{
       config?: OpenClawConfig;
+      assignmentConfig?: OpenClawConfig;
       loadAuthStore?: unknown;
     }>(prepareRuntimeSecretsSnapshot);
-    expect(preflightInput.config?.channels).toBeUndefined();
+    expect(preflightInput.config?.channels).toBeDefined();
+    expect(preflightInput.assignmentConfig?.channels).toBeUndefined();
+    expect(result.sourceConfig.channels).toBeDefined();
+    expect(result.config.channels).toBeUndefined();
   });
 
   it("keeps channel surfaces in secret preflight when breaker suppression is null", async () => {
@@ -1312,15 +1318,18 @@ describe("gateway startup config secret preflight", () => {
     });
     const preflightInput = callArg<{
       config?: OpenClawConfig;
+      assignmentConfig?: OpenClawConfig;
       loadAuthStore?: unknown;
     }>(prepareRuntimeSecretsSnapshot);
     expect(preflightInput.config?.channels).toBeDefined();
+    expect(preflightInput.assignmentConfig).toBeUndefined();
   });
 
   it("still resolves gateway auth SecretRefs when breaker suppression prunes channels", async () => {
-    const prepareRuntimeSecretsSnapshot = vi.fn(async ({ config }) =>
-      preparedSnapshotWithGatewayToken(config),
-    );
+    const prepareRuntimeSecretsSnapshot = vi.fn(async ({ config, assignmentConfig }) => ({
+      ...preparedSnapshotWithGatewayToken(assignmentConfig ?? config),
+      sourceConfig: config,
+    }));
     const activateRuntimeSecrets = runtimeSecretsActivatorForTest({
       prepareRuntimeSecretsSnapshot,
       channelAutostartSuppression: {
@@ -1342,16 +1351,59 @@ describe("gateway startup config secret preflight", () => {
       reason: "startup",
       activate: true,
     });
-    // Gateway auth must remain funtional: token is resolved from SecretRef
+    // Gateway auth must remain functional: token is resolved from SecretRef.
     expect(result.config.gateway?.auth?.token).toBe(RESOLVED_GATEWAY_TOKEN);
     const preflightInput = callArg<{
       config?: OpenClawConfig;
+      assignmentConfig?: OpenClawConfig;
       loadAuthStore?: unknown;
     }>(prepareRuntimeSecretsSnapshot);
-    // Channels are pruned by breaker suppression
-    expect(preflightInput.config?.channels).toBeUndefined();
-    // Gateway auth surface remains intact
+    expect(preflightInput.config?.channels).toBeDefined();
+    expect(preflightInput.assignmentConfig?.channels).toBeUndefined();
     expect(preflightInput.config?.gateway?.auth?.token).toBe("startup-test-token");
+  });
+
+  it("restores full channel assignment projection on reload after suppressed startup", async () => {
+    const prepareRuntimeSecretsSnapshot = vi.fn(async ({ config, assignmentConfig }) => ({
+      ...preparedSnapshot(assignmentConfig ?? config),
+      sourceConfig: config,
+    }));
+    const activateRuntimeSecrets = runtimeSecretsActivatorForTest({
+      prepareRuntimeSecretsSnapshot,
+      channelAutostartSuppression: {
+        reason: "crash-loop-breaker",
+        message: "breaker tripped: 20 unclean boots",
+      },
+    });
+    const config = gatewayTokenConfig(
+      asConfig({
+        channels: {
+          telegram: {
+            botToken: { source: "env", provider: "default", id: "TELEGRAM_BOT_TOKEN" },
+          },
+        },
+      }),
+    );
+
+    const startup = await activateRuntimeSecrets(config, {
+      reason: "startup",
+      activate: true,
+    });
+    const reloaded = await activateRuntimeSecrets(startup.sourceConfig, {
+      reason: "reload",
+      activate: false,
+    });
+
+    expect(startup.sourceConfig.channels).toBeDefined();
+    expect(startup.config.channels).toBeUndefined();
+    expect(reloaded.sourceConfig.channels).toBeDefined();
+    expect(reloaded.config.channels).toBeDefined();
+    const reloadInput = callArg<{
+      config?: OpenClawConfig;
+      assignmentConfig?: OpenClawConfig;
+    }>(prepareRuntimeSecretsSnapshot, 1);
+    expect(reloadInput.config?.channels).toBeDefined();
+    expect(reloadInput.assignmentConfig).toBeUndefined();
   });
 
   it("prunes channels in prepareGatewayStartupConfig when breaker suppression is active", async () => {
@@ -1369,10 +1421,6 @@ describe("gateway startup config secret preflight", () => {
           }),
         ),
       ),
-      channelAutostartSuppression: {
-        reason: "crash-loop-breaker",
-        message: "breaker tripped: 20 unclean boots",
-      },
       activateRuntimeSecrets: runtimeSecretsActivatorForTest({
         prepareRuntimeSecretsSnapshot,
         activateRuntimeSecretsSnapshot,
@@ -1387,9 +1435,11 @@ describe("gateway startup config secret preflight", () => {
     expect(result.auth.token).toBe("startup-test-token");
     const preflightInput = callArg<{
       config?: OpenClawConfig;
+      assignmentConfig?: OpenClawConfig;
       loadAuthStore?: unknown;
     }>(prepareRuntimeSecretsSnapshot);
-    expect(preflightInput.config?.channels).toBeUndefined();
+    expect(preflightInput.config?.channels).toBeDefined();
+    expect(preflightInput.assignmentConfig?.channels).toBeUndefined();
     expect(activateRuntimeSecretsSnapshot).toHaveBeenCalledTimes(1);
   });
 });

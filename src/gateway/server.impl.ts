@@ -663,8 +663,8 @@ export async function startGatewayServer(
       contextKey: code,
     });
   };
-  const { createRuntimeSecretsActivator } = await startupConfigModulePromise;
-  const activateRuntimeSecrets = createRuntimeSecretsActivator({
+  const startupConfigModule = await startupConfigModulePromise;
+  const activateRuntimeSecrets = startupConfigModule.createRuntimeSecretsActivator({
     logSecrets,
     emitStateEvent: emitSecretsStateEvent,
     channelAutostartSuppression: opts.channelAutostartSuppression,
@@ -678,17 +678,15 @@ export async function startGatewayServer(
   const startupActivationSourceConfig = configSnapshot.sourceConfig;
   const startupRuntimeConfig = captureConfigOverrideApplier()(startupConfigSnapshot.config);
   startupTrace.setConfig(startupRuntimeConfig);
-  const { prepareGatewayStartupConfig } = await startupConfigModulePromise;
   const authBootstrap = await startupTrace.measure(
     "config.auth",
     () =>
-      prepareGatewayStartupConfig({
+      startupConfigModule.prepareGatewayStartupConfig({
         configSnapshot: startupConfigSnapshot,
         authOverride: startupAuthOverride,
         tailscaleOverride: startupTailscaleOverride,
         activateRuntimeSecrets,
         log,
-        channelAutostartSuppression: opts.channelAutostartSuppression,
         measure: (name, run, measureOptions) => startupTrace.measure(name, run, measureOptions),
       }),
     { omitErrorMessage: true },
