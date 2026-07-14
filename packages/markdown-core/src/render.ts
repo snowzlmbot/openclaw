@@ -145,6 +145,40 @@ function subtractRanges<T extends { start: number; end: number }>(
   return pieces;
 }
 
+function splitAtBoundaries<T extends { start: number; end: number }>(
+  span: T,
+  boundaries: readonly number[],
+): T[] {
+  let low = 0;
+  let high = boundaries.length;
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2);
+    if ((boundaries[middle] ?? Number.POSITIVE_INFINITY) <= span.start) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  if ((boundaries[low] ?? Number.POSITIVE_INFINITY) >= span.end) {
+    return [span];
+  }
+
+  // Marker targets require proper nesting. Split formatting that crosses a
+  // semantic boundary so it can close before the annotation and reopen after.
+  const pieces: T[] = [];
+  let cursor = span.start;
+  for (let index = low; index < boundaries.length; index += 1) {
+    const boundary = boundaries[index];
+    if (boundary === undefined || boundary >= span.end) {
+      break;
+    }
+    pieces.push({ ...span, start: cursor, end: boundary });
+    cursor = boundary;
+  }
+  pieces.push({ ...span, start: cursor, end: span.end });
+  return pieces;
+}
+
 function sortAnnotationSpans(spans: MarkdownAnnotationSpan[]): MarkdownAnnotationSpan[] {
   return [...spans].toSorted((a, b) => a.start - b.start || b.end - a.end);
 }
@@ -165,12 +199,20 @@ export function renderMarkdownWithMarkers(ir: MarkdownIR, options: RenderOptions
     (span) => annotationMarkers[span.type]?.suppressNestedFormatting === true,
   );
   const dominantAnnotationRanges = mergeRanges(dominantAnnotations);
+  const annotationBoundaries = [
+    ...new Set(annotated.flatMap((span) => [span.start, span.end])),
+  ].toSorted((a, b) => a - b);
   const styled = sortStyleSpans(
     ir.styles
       .filter((span) => Boolean(styleMarkers[span.style]))
-      .flatMap((span) =>
-        STRUCTURAL_STYLES.has(span.style) ? [span] : subtractRanges(span, dominantAnnotationRanges),
-      ),
+      .flatMap((span) => {
+        if (STRUCTURAL_STYLES.has(span.style)) {
+          return [span];
+        }
+        return subtractRanges(span, dominantAnnotationRanges).flatMap((piece) =>
+          splitAtBoundaries(piece, annotationBoundaries),
+        );
+      }),
   );
 
   const boundaries = new Set<number>();
@@ -217,7 +259,12 @@ export function renderMarkdownWithMarkers(ir: MarkdownIR, options: RenderOptions
 
   const linkStarts = new Map<number, RenderLink[]>();
   if (options.buildLink) {
-    for (const link of ir.links.flatMap((span) => subtractRanges(span, dominantAnnotationRanges))) {
+    const links = ir.links.flatMap((span) =>
+      subtractRanges(span, dominantAnnotationRanges).flatMap((piece) =>
+        splitAtBoundaries(piece, annotationBoundaries),
+      ),
+    );
+    for (const link of links) {
       if (link.start === link.end) {
         continue;
       }

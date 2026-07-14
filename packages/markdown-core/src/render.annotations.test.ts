@@ -34,6 +34,22 @@ describe("renderMarkdownWithMarkers semantic annotations", () => {
     ]);
   });
 
+  it("closes and reopens formatting that crosses an annotation boundary", () => {
+    const ir = markdownToIR("user[**Thu] trailing**", {
+      assistantTranscriptRoleHeaders: true,
+    });
+
+    expect(
+      renderMarkdownWithMarkers(ir, {
+        annotationMarkers: {
+          assistant_transcript_role: { open: "`", close: "`" },
+        },
+        styleMarkers: { bold: { open: "*", close: "*" } },
+        escapeText: (text) => text,
+      }),
+    ).toBe("`user[*Thu]*`* trailing*");
+  });
+
   it("keeps structural containers outside dominant annotations", () => {
     const ir = markdownToIR("> user[Thu 2026-07-02] continue", {
       assistantTranscriptRoleHeaders: true,
