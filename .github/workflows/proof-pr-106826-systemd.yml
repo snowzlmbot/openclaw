@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: ${{ env.AFTER_SHA }}
-          fetch-depth: 3
+          fetch-depth: 10
 
       - name: Set up Node environment
         uses: ./.github/actions/setup-node-env
@@ -160,7 +160,11 @@ jobs:
                 }
               }
             },
-            "plugins": { "enabled": true, "entries": { "telegram": { "enabled": true } } },
+            "plugins": {
+              "enabled": true,
+              "load": { "paths": ["${GITHUB_WORKSPACE}/extensions/telegram"] },
+              "entries": { "telegram": { "enabled": true } }
+            },
             "cron": { "enabled": false },
             "browser": { "enabled": false }
           }
