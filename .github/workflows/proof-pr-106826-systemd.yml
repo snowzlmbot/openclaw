@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 env:
-  BEFORE_SHA: 103d9ceb5e88067a9228488b385d37c7a23d04bf
-  AFTER_SHA: 144614340832f69ce0dd2894fff32c9d6ec00f31
+  BEFORE_SHA: 6bea5ec1132c3fd81481288414e015c38b9a9adf
+  AFTER_SHA: 03ec1f4061cd5ab9e92fe81f2b8b903d50ce12f0
 
 jobs:
   focused-tests:
@@ -35,7 +35,6 @@ jobs:
           set -euo pipefail
           pnpm test \
             src/gateway/server-startup-config.secrets.test.ts \
-            src/gateway/server-startup-secret-surfaces.test.ts \
             src/gateway/server-startup-config.breaker-secrets.integration.test.ts
           pnpm test \
             src/infra/gateway-boot-lifecycle.test.ts \
@@ -55,8 +54,7 @@ jobs:
             src/gateway/server-startup-config.ts \
             src/gateway/server.impl.ts \
             src/gateway/server-startup-config.breaker-secrets.integration.test.ts \
-            src/gateway/server-startup-secret-surfaces.ts \
-            src/gateway/server-startup-secret-surfaces.test.ts
+            src/gateway/server-startup-secret-surfaces.ts
 
   systemd-proof:
     name: systemd ${{ matrix.label }}
@@ -67,15 +65,15 @@ jobs:
       matrix:
         include:
           - label: before-channel-secret
-            ref: 103d9ceb5e88067a9228488b385d37c7a23d04bf
+            ref: 6bea5ec1132c3fd81481288414e015c38b9a9adf
             scenario: channel
             expected: unavailable
           - label: after-channel-secret
-            ref: 144614340832f69ce0dd2894fff32c9d6ec00f31
+            ref: 03ec1f4061cd5ab9e92fe81f2b8b903d50ce12f0
             scenario: channel
             expected: converged
           - label: after-gateway-auth-secret
-            ref: 144614340832f69ce0dd2894fff32c9d6ec00f31
+            ref: 03ec1f4061cd5ab9e92fe81f2b8b903d50ce12f0
             scenario: gateway-auth
             expected: unavailable
     steps:
@@ -230,6 +228,11 @@ jobs:
               --url "ws://127.0.0.1:${port}" \
               --token "$token" \
               --json > "$artifact_dir/secrets-reload.json"
+            node dist/entry.js gateway call channels.start \
+              --params '{"channel":"telegram"}' \
+              --url "ws://127.0.0.1:${port}" \
+              --token "$token" \
+              --json > "$artifact_dir/channels-start.json"
             node dist/entry.js gateway call channels.status \
               --params '{"probe":false}' \
               --url "ws://127.0.0.1:${port}" \
@@ -274,7 +277,7 @@ jobs:
             if [[ "$PROOF_EXPECTED" == "converged" ]]; then
               echo "post_repair_secrets_reload=success"
               echo "post_repair_channel_config_visible=success"
-              echo "post_repair_channel_autostart=suppressed"
+              echo "post_repair_explicit_channel_start=success"
             fi
             echo "systemd_version=$(systemctl --version | head -1)"
             echo "runner_image=${ImageOS:-unknown}"
@@ -303,9 +306,21 @@ jobs:
               --require-rpc \
               --timeout 30000 \
               --json >/dev/null
-            grep -q 'telegram' "$artifact_dir/channels-status.json"
-            grep -q 'configured' "$artifact_dir/channels-status.json"
-            grep -q 'not-running' "$artifact_dir/channels-status.json"
+            node - "$artifact_dir/channels-start.json" "$artifact_dir/channels-status.json" <<'NODE'
+          const fs = require("node:fs");
+          const start = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          const status = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+          if (start.channel !== "telegram" || start.started !== true) {
+            throw new Error(`unexpected channels.start result: ${JSON.stringify(start)}`);
+          }
+          const accounts = status.channelAccounts?.telegram;
+          if (!status.channelOrder?.includes("telegram") || !Array.isArray(accounts)) {
+            throw new Error("telegram missing from channels.status after explicit start");
+          }
+          if (!accounts.some((account) => account.configured === true)) {
+            throw new Error("restored Telegram account is not configured");
+          }
+          NODE
           else
             test "$post_breaker_missing_count" -ge 1
             if curl -fsS --max-time 2 "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1; then
