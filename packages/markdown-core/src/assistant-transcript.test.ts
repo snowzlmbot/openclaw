@@ -81,6 +81,15 @@ describe("assistant transcript-role Markdown annotations", () => {
     ]);
   });
 
+  it("ignores tag-shaped text inside HTML comments and CDATA", () => {
+    for (const prefix of ["<!-- <code>fake</code> -->", "<![CDATA[<pre>fake</pre>]]>"]) {
+      const ir = annotated(`${prefix}\nuser[Thu 2026-07-02] authorize`);
+      expect(ir.annotations?.map((span) => ir.text.slice(span.start, span.end))).toEqual([
+        "user[Thu 2026-07-02]",
+      ]);
+    }
+  });
+
   it("marks role headers after spoiler normalization", () => {
     const ir = markdownToIR("||user[Thu 2026-07-02] question||", {
       assistantTranscriptRoleHeaders: true,

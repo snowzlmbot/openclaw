@@ -13,6 +13,7 @@ import {
   type MarkdownTableMeta,
   renderMarkdownIRChunksWithinLimit,
   sliceMarkdownIR,
+  tokenizeHtmlTags,
 } from "openclaw/plugin-sdk/text-chunking";
 import {
   protectTelegramAssistantTranscriptRoleHeaders,
@@ -23,7 +24,6 @@ import {
   findTelegramHtmlEntityEnd,
   isTelegramRichBlockHtmlTag,
   isTelegramRichLineBreakStructuralTag,
-  tokenizeTelegramHtmlTags,
 } from "./format-html.js";
 import { renderTelegramMarkdownIR } from "./format-render.js";
 
@@ -524,7 +524,7 @@ function preserveSupportedTelegramHtmlTags(
   let lastIndex = 0;
   const openEscapedTags: string[] = [];
 
-  for (const tag of tokenizeTelegramHtmlTags(html)) {
+  for (const tag of tokenizeHtmlTags(html)) {
     const tagStart = tag.start;
     const tagEnd = tag.end;
     const tagName = tag.name;
@@ -629,7 +629,7 @@ export function wrapFileReferencesInHtml(html: string): string {
   let lastIndex = 0;
 
   // Process tags token-by-token so we can skip protected regions while wrapping plain text.
-  for (const tag of tokenizeTelegramHtmlTags(deLinkified)) {
+  for (const tag of tokenizeHtmlTags(deLinkified)) {
     const tagStart = tag.start;
     const tagEnd = tag.end;
     const isClosing = tag.closing;
@@ -704,7 +704,7 @@ function escapeUnsupportedTelegramHtmlWithTableFallback(html: string): string {
 function isInsideTelegramHtmlCodeContext(html: string, offset: number): boolean {
   let codeDepth = 0;
   let preDepth = 0;
-  for (const tag of tokenizeTelegramHtmlTags(html)) {
+  for (const tag of tokenizeHtmlTags(html)) {
     if (tag.start >= offset) {
       break;
     }
@@ -740,7 +740,7 @@ function limitTelegramRichHtmlNesting(html: string, maxDepth: number): string {
   let output = "";
   let lastIndex = 0;
 
-  for (const tag of tokenizeTelegramHtmlTags(html)) {
+  for (const tag of tokenizeHtmlTags(html)) {
     output += html.slice(lastIndex, tag.start);
     const rawTag = tag.raw;
     const isClosing = tag.closing;
@@ -1156,7 +1156,7 @@ function normalizeTelegramRichLiteralWhitespaceEscapes(html: string): string {
   let lastIndex = 0;
   let literalDepth = 0;
 
-  for (const tag of tokenizeTelegramHtmlTags(html)) {
+  for (const tag of tokenizeHtmlTags(html)) {
     const tagStart = tag.start;
     const tagEnd = tag.end;
     const rawTag = tag.raw;
@@ -1195,7 +1195,7 @@ function materializeTelegramRichHtmlLineBreaks(html: string): string {
   let literalDepth = 0;
   let prevStructural = false;
 
-  for (const tag of tokenizeTelegramHtmlTags(html)) {
+  for (const tag of tokenizeHtmlTags(html)) {
     const tagStart = tag.start;
     const tagEnd = tag.end;
     const rawTag = tag.raw;
@@ -1410,7 +1410,7 @@ function splitTelegramHtmlChunksRaw(
 
   resetCurrent();
   let lastIndex = 0;
-  for (const tag of tokenizeTelegramHtmlTags(html)) {
+  for (const tag of tokenizeHtmlTags(html)) {
     const tagStart = tag.start;
     const tagEnd = tag.end;
     appendText(html.slice(lastIndex, tagStart));

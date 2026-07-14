@@ -1,11 +1,11 @@
 // Assistant transcript annotations are produced after Markdown inline parsing and text joining.
 import type MarkdownIt from "markdown-it";
-import { HTML_TAG_RE } from "markdown-it/lib/common/html_re.mjs";
 import type Token from "markdown-it/lib/token.mjs";
 import {
   findAssistantTranscriptRoleHeaderSpans,
   type AssistantTranscriptRoleHeaderSpan,
 } from "./assistant-transcript-headers.js";
+import { tokenizeHtmlTags } from "./html-tags.js";
 
 export const ASSISTANT_TRANSCRIPT_ROLE_NODE_TYPE = "assistant_transcript_role_text";
 
@@ -33,83 +33,30 @@ type AssistantTranscriptRoleMarkdownOptions = {
 
 const RAW_CODE_CONTAINER_TAGS = new Set(["code", "pre", "script", "style", "textarea"]);
 
-type RawCodeContainerTag = {
-  closing: boolean;
-  name: string;
-  selfClosing: boolean;
-};
-
-function isAsciiTagNameCharacter(char: string | undefined): boolean {
-  if (!char) {
-    return false;
-  }
-  const code = char.charCodeAt(0);
-  return (
-    (code >= 0x30 && code <= 0x39) ||
-    (code >= 0x41 && code <= 0x5a) ||
-    (code >= 0x61 && code <= 0x7a) ||
-    char === "-"
-  );
-}
-
-function parseRawCodeContainerTag(rawTag: string): RawCodeContainerTag | null {
-  if (rawTag[0] !== "<") {
-    return null;
-  }
-  let cursor = 1;
-  const closing = rawTag[cursor] === "/";
-  if (closing) {
-    cursor += 1;
-  }
-  const nameStart = cursor;
-  while (isAsciiTagNameCharacter(rawTag[cursor])) {
-    cursor += 1;
-  }
-  const name = rawTag.slice(nameStart, cursor).toLowerCase();
-  if (!RAW_CODE_CONTAINER_TAGS.has(name)) {
-    return null;
-  }
-  return {
-    closing,
-    name,
-    selfClosing: rawTag.trimEnd().endsWith("/>"),
-  };
-}
-
 function findRawCodeContainerRanges(text: string): Array<{ start: number; end: number }> {
   const ranges: Array<{ start: number; end: number }> = [];
   const openTags: string[] = [];
   let rangeStart = -1;
-  let cursor = 0;
 
-  while (cursor < text.length) {
-    const tagStart = text.indexOf("<", cursor);
-    if (tagStart === -1) {
-      break;
-    }
-    const match = text.slice(tagStart).match(HTML_TAG_RE);
-    const rawTag = match?.[0];
-    if (!rawTag) {
-      cursor = tagStart + 1;
+  for (const tag of tokenizeHtmlTags(text)) {
+    if (!RAW_CODE_CONTAINER_TAGS.has(tag.name)) {
       continue;
     }
-    const tag = parseRawCodeContainerTag(rawTag);
-    if (tag?.closing) {
+    if (tag.closing) {
       const openIndex = openTags.lastIndexOf(tag.name);
       if (openIndex !== -1) {
         openTags.splice(openIndex);
         if (openTags.length === 0 && rangeStart !== -1) {
-          ranges.push({ start: rangeStart, end: tagStart + rawTag.length });
+          ranges.push({ start: rangeStart, end: tag.end });
           rangeStart = -1;
         }
       }
-    } else if (tag && !tag.selfClosing) {
+    } else if (!tag.selfClosing) {
       if (openTags.length === 0) {
-        rangeStart = tagStart;
+        rangeStart = tag.start;
       }
       openTags.push(tag.name);
     }
-    cursor = tagStart + rawTag.length;
   }
 
   if (openTags.length > 0 && rangeStart !== -1) {
