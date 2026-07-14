@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 env:
-  BEFORE_SHA: 6bea5ec1132c3fd81481288414e015c38b9a9adf
-  AFTER_SHA: 03ec1f4061cd5ab9e92fe81f2b8b903d50ce12f0
+  BEFORE_SHA: f59a0352b31cf270b1d33b2aa79c88fcc16de846
+  AFTER_SHA: c73990148a435c189ef9e13d6a8632e919c66556
 
 jobs:
   focused-tests:
@@ -43,14 +43,20 @@ jobs:
             src/gateway/server-reload-handlers.test.ts \
             src/gateway/server-methods/channels.start.test.ts
 
-      - name: Run changed-file gate
+      - name: Run scoped static gates
         run: |
           set -euo pipefail
-          pnpm check:changed --base "$BEFORE_SHA" --head "$AFTER_SHA" -- \
+          git diff --check "$BEFORE_SHA...$AFTER_SHA"
+          pnpm check:loc --base "$BEFORE_SHA" --head "$AFTER_SHA"
+          pnpm format:check -- \
             docs/cli/secrets.md \
             docs/gateway/index.md \
             src/gateway/server-aux-handlers.ts \
             src/gateway/server-aux-handlers.test.ts \
+            src/gateway/server-channel-runtime-lifecycle.ts \
+            src/gateway/server-channels.ts \
+            src/gateway/server-channels.test.ts \
+            src/gateway/server-secrets-reload-channels.ts \
             src/gateway/server-startup-config.ts \
             src/gateway/server.impl.ts \
             src/gateway/server-startup-config.breaker-secrets.integration.test.ts \
@@ -59,21 +65,21 @@ jobs:
   systemd-proof:
     name: systemd ${{ matrix.label }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
         include:
           - label: before-channel-secret
-            ref: 6bea5ec1132c3fd81481288414e015c38b9a9adf
+            ref: f59a0352b31cf270b1d33b2aa79c88fcc16de846
             scenario: channel
             expected: unavailable
           - label: after-channel-secret
-            ref: 03ec1f4061cd5ab9e92fe81f2b8b903d50ce12f0
+            ref: c73990148a435c189ef9e13d6a8632e919c66556
             scenario: channel
             expected: converged
           - label: after-gateway-auth-secret
-            ref: 03ec1f4061cd5ab9e92fe81f2b8b903d50ce12f0
+            ref: c73990148a435c189ef9e13d6a8632e919c66556
             scenario: gateway-auth
             expected: unavailable
     steps:
@@ -82,6 +88,12 @@ jobs:
         with:
           ref: ${{ matrix.ref }}
           fetch-depth: 1
+
+      - name: Verify exact checkout
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ matrix.ref }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
 
       - name: Set up Node environment
         uses: ./.github/actions/setup-node-env
@@ -121,14 +133,115 @@ jobs:
           artifact_dir="$RUNNER_TEMP/proof-artifacts"
           state_dir="$RUNNER_TEMP/openclaw-state"
           config_path="$state_dir/openclaw.json"
-          secret_path="$state_dir/PROOF_MISSING_TELEGRAM_TOKEN.json"
+          secret_path="$state_dir/PROOF_MISSING_IRC_PASSWORDS.json"
+          irc_events="$artifact_dir/irc-events.jsonl"
+          irc_ready="$RUNNER_TEMP/irc-proof-ready"
           unit="openclaw-gateway.service"
           mkdir -p "$artifact_dir" "$state_dir"
           chmod 700 "$state_dir"
 
-          port="$(node -e "const n=require('node:net');const s=n.createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})")"
-          token="proof-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RANDOM}"
-          echo "::add-mask::$token"
+          gateway_port="$(node -e "const n=require('node:net');const s=n.createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})")"
+          irc_port="$(node -e "const n=require('node:net');const s=n.createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})")"
+          proof_auth="proof-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RANDOM}"
+          alpha_v1="proof-alpha-v1"
+          alpha_v2="proof-alpha-v2"
+          beta_v1="proof-beta-v1"
+          echo "::add-mask::$proof_auth"
+          echo "::add-mask::$alpha_v1"
+          echo "::add-mask::$alpha_v2"
+          echo "::add-mask::$beta_v1"
+
+          cat > "$RUNNER_TEMP/irc-proof-server.mjs" <<'NODE'
+          import crypto from "node:crypto";
+          import fs from "node:fs";
+          import net from "node:net";
+
+          const port = Number(process.env.IRC_PROOF_PORT);
+          const eventsPath = process.env.IRC_PROOF_EVENTS;
+          const readyPath = process.env.IRC_PROOF_READY;
+          let nextConnectionId = 0;
+          let sequence = 0;
+          const sockets = new Set();
+          const append = (event) => {
+            fs.appendFileSync(
+              eventsPath,
+              `${JSON.stringify({ sequence: ++sequence, at: Date.now(), ...event })}\n`,
+            );
+          };
+          const digest = (value) =>
+            crypto.createHash("sha256").update(value ?? "").digest("hex");
+
+          const server = net.createServer((socket) => {
+            const connectionId = ++nextConnectionId;
+            let buffer = "";
+            let pass = "";
+            let nick = "";
+            let hasUser = false;
+            let registered = false;
+            sockets.add(socket);
+            socket.setEncoding("utf8");
+            append({ event: "connect", connectionId });
+            socket.on("data", (chunk) => {
+              buffer += chunk;
+              let newline = buffer.indexOf("\n");
+              while (newline !== -1) {
+                const line = buffer.slice(0, newline).replace(/\r$/, "");
+                buffer = buffer.slice(newline + 1);
+                newline = buffer.indexOf("\n");
+                if (line.startsWith("PASS ")) {
+                  pass = line.slice(5).replace(/^:/, "");
+                } else if (line.startsWith("NICK ")) {
+                  nick = line.slice(5).replace(/^:/, "").trim();
+                  append({ event: "nick", connectionId, nick });
+                } else if (line.startsWith("USER ")) {
+                  hasUser = true;
+                } else if (line.startsWith("PING ")) {
+                  socket.write(`PONG ${line.slice(5)}\r\n`);
+                } else if (line.startsWith("QUIT")) {
+                  append({ event: "quit", connectionId, nick });
+                }
+                if (!registered && nick && hasUser) {
+                  registered = true;
+                  append({
+                    event: "registered",
+                    connectionId,
+                    nick,
+                    passSha256: digest(pass),
+                  });
+                  socket.write(`:proof 001 ${nick} :welcome\r\n`);
+                }
+              }
+            });
+            socket.on("close", () => {
+              sockets.delete(socket);
+              append({ event: "close", connectionId, nick });
+            });
+          });
+
+          server.listen(port, "127.0.0.1", () => {
+            fs.writeFileSync(readyPath, String(port));
+          });
+
+          const shutdown = () => {
+            for (const socket of sockets) {
+              socket.destroy();
+            }
+            server.close(() => process.exit(0));
+          };
+          process.on("SIGTERM", shutdown);
+          process.on("SIGINT", shutdown);
+          NODE
+
+          IRC_PROOF_PORT="$irc_port" \
+          IRC_PROOF_EVENTS="$irc_events" \
+          IRC_PROOF_READY="$irc_ready" \
+            node "$RUNNER_TEMP/irc-proof-server.mjs" &
+          irc_server_pid=$!
+          for _ in $(seq 1 50); do
+            test -f "$irc_ready" && break
+            sleep 0.1
+          done
+          test -f "$irc_ready"
 
           if [[ "$PROOF_SCENARIO" == "channel" ]]; then
             cat > "$config_path" <<EOF
@@ -145,25 +258,49 @@ jobs:
             "gateway": {
               "mode": "local",
               "bind": "loopback",
-              "port": ${port},
-              "auth": { "mode": "token", "token": "${token}" },
+              "port": ${gateway_port},
+              "auth": { "mode": "token", "token": "${proof_auth}" },
               "controlUi": { "enabled": false },
               "tailscale": { "mode": "off" }
             },
             "channels": {
-              "telegram": {
+              "irc": {
                 "enabled": true,
-                "botToken": {
-                  "source": "file",
-                  "provider": "proof-file",
-                  "id": "/telegramToken"
+                "defaultAccount": "alpha",
+                "dmPolicy": "disabled",
+                "groupPolicy": "disabled",
+                "accounts": {
+                  "alpha": {
+                    "enabled": true,
+                    "host": "127.0.0.1",
+                    "port": ${irc_port},
+                    "tls": false,
+                    "nick": "proof-alpha",
+                    "password": {
+                      "source": "file",
+                      "provider": "proof-file",
+                      "id": "/alphaPassword"
+                    }
+                  },
+                  "beta": {
+                    "enabled": true,
+                    "host": "127.0.0.1",
+                    "port": ${irc_port},
+                    "tls": false,
+                    "nick": "proof-beta",
+                    "password": {
+                      "source": "file",
+                      "provider": "proof-file",
+                      "id": "/betaPassword"
+                    }
+                  }
                 }
               }
             },
             "plugins": {
               "enabled": true,
-              "load": { "paths": ["${GITHUB_WORKSPACE}/extensions/telegram"] },
-              "entries": { "telegram": { "enabled": true } }
+              "load": { "paths": ["${GITHUB_WORKSPACE}/extensions/irc"] },
+              "entries": { "irc": { "enabled": true } }
             },
             "cron": { "enabled": false },
             "browser": { "enabled": false }
@@ -176,8 +313,8 @@ jobs:
             "gateway": {
               "mode": "local",
               "bind": "loopback",
-              "port": ${port},
-              "auth": { "mode": "token", "token": "${token}" },
+              "port": ${gateway_port},
+              "auth": { "mode": "token", "token": "${proof_auth}" },
               "controlUi": { "enabled": false },
               "tailscale": { "mode": "off" }
             },
@@ -190,12 +327,14 @@ jobs:
 
           cleanup() {
             systemctl --user stop "$unit" >/dev/null 2>&1 || true
+            kill "$irc_server_pid" >/dev/null 2>&1 || true
+            wait "$irc_server_pid" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
 
           export OPENCLAW_STATE_DIR="$state_dir"
           export OPENCLAW_CONFIG_PATH="$config_path"
-          export OPENCLAW_GATEWAY_PORT="$port"
+          export OPENCLAW_GATEWAY_PORT="$gateway_port"
           export OPENCLAW_SKIP_CRON=1
           node dist/entry.js gateway install --force --json > "$artifact_dir/install.json"
           if [[ "$PROOF_SCENARIO" == "gateway-auth" ]]; then
@@ -217,37 +356,86 @@ jobs:
           systemctl --user start "$unit"
 
           if [[ "$PROOF_EXPECTED" == "converged" ]]; then
-            for _ in $(seq 1 120); do
+            for _ in $(seq 1 150); do
               if systemctl --user is-active --quiet "$unit" && \
-                curl -fsS "http://127.0.0.1:${port}/healthz" >/dev/null && \
-                curl -fsS "http://127.0.0.1:${port}/readyz" >/dev/null; then
+                curl -fsS "http://127.0.0.1:${gateway_port}/healthz" >/dev/null && \
+                curl -fsS "http://127.0.0.1:${gateway_port}/readyz" >/dev/null && \
+                journalctl --user -u "$unit" --since "$started_at" --no-pager | \
+                  grep -Fq "restart-loop breaker tripped"; then
                 break
               fi
               sleep 1
             done
 
-            printf '%s\n' '{"telegramToken":"proof-restored-token"}' > "$secret_path"
-            chmod 600 "$secret_path"
+            printf '%s\n' \
+              "{\"alphaPassword\":\"${alpha_v1}\",\"betaPassword\":\"${beta_v1}\"}" \
+              > "${secret_path}.tmp"
+            chmod 600 "${secret_path}.tmp"
+            mv "${secret_path}.tmp" "$secret_path"
             node dist/entry.js secrets reload \
-              --url "ws://127.0.0.1:${port}" \
-              --token "$token" \
-              --json > "$artifact_dir/secrets-reload.json"
-            node dist/entry.js gateway call channels.start \
-              --params '{"channel":"telegram"}' \
-              --url "ws://127.0.0.1:${port}" \
-              --token "$token" \
-              --json > "$artifact_dir/channels-start.json"
+              --url "ws://127.0.0.1:${gateway_port}" \
+              --token "$proof_auth" \
+              --json > "$artifact_dir/secrets-reload-v1.json"
             node dist/entry.js gateway call channels.status \
               --params '{"probe":false}' \
-              --url "ws://127.0.0.1:${port}" \
-              --token "$token" \
-              --json > "$artifact_dir/channels-status.json"
+              --url "ws://127.0.0.1:${gateway_port}" \
+              --token "$proof_auth" \
+              --json > "$artifact_dir/channels-status-before-start.json"
+            node dist/entry.js gateway call channels.stop \
+              --params '{"channel":"irc","accountId":"beta"}' \
+              --url "ws://127.0.0.1:${gateway_port}" \
+              --token "$proof_auth" \
+              --json > "$artifact_dir/stop-beta.json"
+            node dist/entry.js gateway call channels.start \
+              --params '{"channel":"irc","accountId":"alpha"}' \
+              --url "ws://127.0.0.1:${gateway_port}" \
+              --token "$proof_auth" \
+              --json > "$artifact_dir/start-alpha.json"
+            for _ in $(seq 1 100); do
+              registered_count="$(node -e '
+                const fs = require("node:fs");
+                const path = process.argv[1];
+                const lines = fs.existsSync(path) ? fs.readFileSync(path, "utf8").trim().split("\n").filter(Boolean) : [];
+                console.log(lines.map(JSON.parse).filter((event) => event.event === "registered").length);
+              ' "$irc_events")"
+              test "$registered_count" -ge 1 && break
+              sleep 0.1
+            done
+
+            pid_before_rotation="$(systemctl --user show "$unit" -p MainPID --value)"
+            restarts_before_rotation="$(systemctl --user show "$unit" -p NRestarts --value)"
+            printf '%s\n' \
+              "{\"alphaPassword\":\"${alpha_v2}\",\"betaPassword\":\"${beta_v1}\"}" \
+              > "${secret_path}.tmp"
+            chmod 600 "${secret_path}.tmp"
+            mv "${secret_path}.tmp" "$secret_path"
+            node dist/entry.js secrets reload \
+              --url "ws://127.0.0.1:${gateway_port}" \
+              --token "$proof_auth" \
+              --json > "$artifact_dir/secrets-reload-v2.json"
+            for _ in $(seq 1 100); do
+              registered_count="$(node -e '
+                const fs = require("node:fs");
+                const path = process.argv[1];
+                const lines = fs.existsSync(path) ? fs.readFileSync(path, "utf8").trim().split("\n").filter(Boolean) : [];
+                console.log(lines.map(JSON.parse).filter((event) => event.event === "registered").length);
+              ' "$irc_events")"
+              test "$registered_count" -ge 2 && break
+              sleep 0.1
+            done
+            node dist/entry.js gateway call channels.status \
+              --params '{"probe":false}' \
+              --url "ws://127.0.0.1:${gateway_port}" \
+              --token "$proof_auth" \
+              --json > "$artifact_dir/channels-status-final.json"
+            pid_after_rotation="$(systemctl --user show "$unit" -p MainPID --value)"
+            restarts_after_rotation="$(systemctl --user show "$unit" -p NRestarts --value)"
           else
             sleep 45
           fi
 
           journalctl --user -u "$unit" --since "$started_at" --no-pager > "$artifact_dir/journal.raw"
-          missing_id="PROOF_MISSING_TELEGRAM_TOKEN"
+          missing_id="PROOF_MISSING_IRC_PASSWORDS.json"
           if [[ "$PROOF_SCENARIO" == "gateway-auth" ]]; then
             missing_id="PROOF_MISSING_GATEWAY_TOKEN"
           fi
@@ -279,9 +467,12 @@ jobs:
             echo "restarts_before_stability_window=$restarts_before"
             echo "restarts_after_stability_window=$restarts_after"
             if [[ "$PROOF_EXPECTED" == "converged" ]]; then
-              echo "post_repair_secrets_reload=success"
-              echo "post_repair_channel_config_visible=success"
-              echo "post_repair_explicit_channel_start=success"
+              echo "pid_before_rotation=$pid_before_rotation"
+              echo "pid_after_rotation=$pid_after_rotation"
+              echo "restarts_before_rotation=$restarts_before_rotation"
+              echo "restarts_after_rotation=$restarts_after_rotation"
+              echo "safe_mode_running_account_rotation=success"
+              echo "safe_mode_stopped_sibling_preserved=success"
             fi
             echo "systemd_version=$(systemctl --version | head -1)"
             echo "runner_image=${ImageOS:-unknown}"
@@ -291,7 +482,10 @@ jobs:
             -e "s#${GITHUB_WORKSPACE}#<workspace>#g" \
             -e "s#${RUNNER_TEMP}#<runner-temp>#g" \
             -e "s#${HOME}#<home>#g" \
-            -e "s#${token}#<redacted>#g" \
+            -e "s#${proof_auth}#<redacted>#g" \
+            -e "s#${alpha_v1}#<redacted>#g" \
+            -e "s#${alpha_v2}#<redacted>#g" \
+            -e "s#${beta_v1}#<redacted>#g" \
             "$artifact_dir/journal.raw" > "$artifact_dir/journal.txt"
           rm "$artifact_dir/journal.raw" "$artifact_dir/install.json"
 
@@ -302,32 +496,95 @@ jobs:
             test "$active_state" = "active"
             test "$sub_state" = "running"
             test "$restarts_before" -eq "$restarts_after"
-            curl -fsS "http://127.0.0.1:${port}/healthz" >/dev/null
-            curl -fsS "http://127.0.0.1:${port}/readyz" >/dev/null
+            test "$pid_before_rotation" = "$pid_after_rotation"
+            test "$restarts_before_rotation" -eq "$restarts_after_rotation"
+            curl -fsS "http://127.0.0.1:${gateway_port}/healthz" >/dev/null
+            curl -fsS "http://127.0.0.1:${gateway_port}/readyz" >/dev/null
             node dist/entry.js gateway status \
-              --url "ws://127.0.0.1:${port}" \
-              --token "$token" \
+              --url "ws://127.0.0.1:${gateway_port}" \
+              --token "$proof_auth" \
               --require-rpc \
               --timeout 30000 \
               --json >/dev/null
-            node - "$artifact_dir/channels-start.json" "$artifact_dir/channels-status.json" <<'NODE'
+            grep -Fq "restarting irc:alpha channel after secrets reload" "$artifact_dir/journal.txt"
+            if grep -Fq "restarting irc:beta channel after secrets reload" "$artifact_dir/journal.txt"; then
+              echo "stopped beta account was restarted" >&2
+              exit 1
+            fi
+            node - \
+              "$artifact_dir/secrets-reload-v1.json" \
+              "$artifact_dir/secrets-reload-v2.json" \
+              "$artifact_dir/start-alpha.json" \
+              "$artifact_dir/channels-status-before-start.json" \
+              "$artifact_dir/channels-status-final.json" \
+              "$irc_events" \
+              "$alpha_v1" \
+              "$alpha_v2" <<'NODE'
+          const crypto = require("node:crypto");
           const fs = require("node:fs");
-          const start = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-          const status = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
-          if (start.channel !== "telegram" || start.started !== true) {
+          const readJson = (path) => JSON.parse(fs.readFileSync(path, "utf8"));
+          const [reloadV1Path, reloadV2Path, startPath, beforeStatusPath, finalStatusPath, eventsPath, alphaV1, alphaV2] = process.argv.slice(2);
+          const reloadV1 = readJson(reloadV1Path);
+          const reloadV2 = readJson(reloadV2Path);
+          const start = readJson(startPath);
+          const beforeStatus = readJson(beforeStatusPath);
+          const finalStatus = readJson(finalStatusPath);
+          const events = fs.readFileSync(eventsPath, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse);
+          const accounts = (status) => {
+            const value = status.channelAccounts?.irc;
+            return Array.isArray(value) ? value : Object.values(value ?? {});
+          };
+          const findAccount = (status, accountId) => accounts(status).find((account) => account.accountId === accountId);
+          const digest = (value) => crypto.createHash("sha256").update(value).digest("hex");
+          if (reloadV1.ok !== true || reloadV2.ok !== true) {
+            throw new Error("secrets.reload did not succeed twice");
+          }
+          if (start.channel !== "irc" || start.accountId !== "alpha" || start.started !== true) {
             throw new Error(`unexpected channels.start result: ${JSON.stringify(start)}`);
           }
-          const accounts = status.channelAccounts?.telegram;
-          if (!status.channelOrder?.includes("telegram") || !Array.isArray(accounts)) {
-            throw new Error("telegram missing from channels.status after explicit start");
+          for (const accountId of ["alpha", "beta"]) {
+            const account = findAccount(beforeStatus, accountId);
+            if (!account || account.configured !== true || account.running === true) {
+              throw new Error(`unexpected pre-start status for ${accountId}: ${JSON.stringify(account)}`);
+            }
           }
-          if (!accounts.some((account) => account.configured === true)) {
-            throw new Error("restored Telegram account is not configured");
+          const finalAlpha = findAccount(finalStatus, "alpha");
+          const finalBeta = findAccount(finalStatus, "beta");
+          if (finalAlpha?.running !== true || finalBeta?.running === true) {
+            throw new Error(`unexpected final channel state: ${JSON.stringify({ finalAlpha, finalBeta })}`);
+          }
+          const registered = events.filter((event) => event.event === "registered");
+          if (registered.length !== 2) {
+            throw new Error(`expected exactly two IRC registrations: ${JSON.stringify(registered)}`);
+          }
+          const expectedDigests = [digest(alphaV1), digest(alphaV2)];
+          for (let index = 0; index < registered.length; index += 1) {
+            if (registered[index].nick !== "proof-alpha" || registered[index].passSha256 !== expectedDigests[index]) {
+              throw new Error(`unexpected registration ${index}: ${JSON.stringify(registered[index])}`);
+            }
+          }
+          if (registered[0].connectionId === registered[1].connectionId) {
+            throw new Error("credential rotation did not create a new IRC connection");
+          }
+          const firstClosed = events.some(
+            (event) =>
+              event.connectionId === registered[0].connectionId &&
+              (event.event === "quit" || event.event === "close") &&
+              event.sequence < registered[1].sequence,
+          );
+          if (!firstClosed) {
+            throw new Error("first IRC connection did not stop before the v2 registration");
+          }
+          if (events.filter((event) => event.event === "connect").length !== 2) {
+            throw new Error(`unexpected IRC connection count: ${JSON.stringify(events)}`);
+          }
+          if (events.some((event) => event.nick === "proof-beta")) {
+            throw new Error("stopped beta account reached the IRC server");
           }
           NODE
           else
             test "$post_breaker_missing_count" -ge 1
-            if curl -fsS --max-time 2 "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1; then
+            if curl -fsS --max-time 2 "http://127.0.0.1:${gateway_port}/healthz" >/dev/null 2>&1; then
               echo "unexpectedly reached the control plane" >&2
               exit 1
             fi
