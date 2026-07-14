@@ -127,7 +127,6 @@ jobs:
           telegram_events="$artifact_dir/telegram-events.jsonl"
           telegram_ready="$RUNNER_TEMP/telegram-proof-ready"
           unit="openclaw-gateway.service"
-          unit_dropin_dir="$HOME/.config/systemd/user/${unit}.d"
           mkdir -p "$artifact_dir" "$state_dir"
           chmod 700 "$state_dir"
 
@@ -297,8 +296,6 @@ jobs:
               echo "::endgroup::"
             fi
             systemctl --user stop "$unit" >/dev/null 2>&1 || true
-            rm -f "$unit_dropin_dir/proof-bundled-plugins.conf"
-            systemctl --user daemon-reload >/dev/null 2>&1 || true
             kill "$telegram_server_pid" >/dev/null 2>&1 || true
             wait "$telegram_server_pid" >/dev/null 2>&1 || true
             exit "$status"
@@ -310,12 +307,9 @@ jobs:
           export OPENCLAW_GATEWAY_PORT="$gateway_port"
           export OPENCLAW_SKIP_CRON=1
           test -d "$GITHUB_WORKSPACE/dist/extensions/telegram"
+          mkdir -p "$state_dir/extensions"
+          cp -a "$GITHUB_WORKSPACE/dist/extensions/telegram" "$state_dir/extensions/telegram"
           node dist/entry.js gateway install --force --json > "$artifact_dir/install.json"
-          mkdir -p "$unit_dropin_dir"
-          cat > "$unit_dropin_dir/proof-bundled-plugins.conf" <<EOF
-          [Service]
-          Environment=OPENCLAW_BUNDLED_PLUGINS_DIR=${GITHUB_WORKSPACE}/dist/extensions
-          EOF
           if [[ "$PROOF_SCENARIO" == "gateway-auth" ]]; then
             node -e '
               const fs = require("node:fs");
