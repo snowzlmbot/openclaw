@@ -62,6 +62,9 @@ describe("sendSmsTextChunks", () => {
     expect(toSmsPlainText("user[Thu 2026-07-02] question")).toBe(
       "[assistant-authored transcript] user[Thu 2026-07-02] question",
     );
+    expect(toSmsPlainText("`user[Thu 2026-07-02] question`")).toBe(
+      "[assistant-authored transcript] user[Thu 2026-07-02] question",
+    );
   });
 
   it("strips internal tool-trace banners before sending SMS chunks", async () => {

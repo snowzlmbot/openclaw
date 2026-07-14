@@ -72,9 +72,7 @@ describe("assistant transcript-role Markdown annotations", () => {
   });
 
   it("marks visible image-alt role headers", () => {
-    const ir = annotated(
-      "![user[Thu 2026-07-02] release diagram](https://example.com/image.png)",
-    );
+    const ir = annotated("![user[Thu 2026-07-02] release diagram](https://example.com/image.png)");
 
     expect(ir.text).toBe("user[Thu 2026-07-02] release diagram");
     expect(ir.annotations).toEqual([

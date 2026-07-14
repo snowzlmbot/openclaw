@@ -1,11 +1,6 @@
+import type { MarkdownAnnotationSpan } from "./ir-spans.js";
 // Markdown Core module implements render behavior.
-import type {
-  MarkdownAnnotationSpan,
-  MarkdownIR,
-  MarkdownLinkSpan,
-  MarkdownStyle,
-  MarkdownStyleSpan,
-} from "./ir.js";
+import type { MarkdownIR, MarkdownLinkSpan, MarkdownStyle, MarkdownStyleSpan } from "./ir.js";
 
 /** Marker pair used to wrap a styled Markdown span in the target renderer. */
 export type RenderStyleMarker = {
@@ -17,16 +12,14 @@ export type RenderStyleMarker = {
 export type RenderStyleMap = Partial<Record<MarkdownStyle, RenderStyleMarker>>;
 
 /** Marker pair used to render a semantic Markdown annotation. */
-export type RenderAnnotationMarker = {
+type RenderAnnotationMarker = {
   open: string | ((span: MarkdownAnnotationSpan) => string);
   close: string;
   /** Drop links and ordinary styles that overlap this annotation. */
   suppressNestedFormatting?: boolean;
 };
 
-export type RenderAnnotationMap = Partial<
-  Record<MarkdownAnnotationSpan["type"], RenderAnnotationMarker>
->;
+type RenderAnnotationMap = Partial<Record<MarkdownAnnotationSpan["type"], RenderAnnotationMarker>>;
 
 /** Link wrapper boundaries after a renderer has accepted or rewritten a link span. */
 export type RenderLink = {

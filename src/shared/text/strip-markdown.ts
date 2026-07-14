@@ -1,6 +1,7 @@
+import { findAssistantTranscriptRoleHeaderSpans } from "../../../packages/markdown-core/src/assistant-transcript.js";
 import { markdownToIR, type MarkdownIR } from "../../../packages/markdown-core/src/ir.js";
 
-export type StripMarkdownOptions = {
+type StripMarkdownOptions = {
   /** Mark parsed assistant transcript-role headers in transports without rich text. */
   assistantTranscriptRoleHeaders?: boolean;
   /** Prefix inserted before each marked transcript-role header. */
@@ -12,25 +13,13 @@ export type StripMarkdownOptions = {
 type PlainTextInsertion = {
   position: number;
   text: string;
-  order: number;
 };
 
-function collectPlainTextInsertions(
+function collectLinkInsertions(
   ir: MarkdownIR,
   options: StripMarkdownOptions,
 ): PlainTextInsertion[] {
   const insertions: PlainTextInsertion[] = [];
-  const rolePrefix =
-    options.assistantTranscriptRoleHeaders === true
-      ? (options.assistantTranscriptRolePrefix ?? "[assistant-authored transcript] ")
-      : "";
-  if (rolePrefix) {
-    for (const annotation of ir.annotations ?? []) {
-      if (annotation.type === "assistant_transcript_role") {
-        insertions.push({ position: annotation.start, text: rolePrefix, order: 0 });
-      }
-    }
-  }
   const linkStyle = options.linkStyle ?? "label-and-url";
   if (linkStyle === "label-and-url") {
     for (const link of ir.links) {
@@ -38,18 +27,35 @@ function collectPlainTextInsertions(
       const label = ir.text.slice(link.start, link.end).trim();
       const comparableHref = href.startsWith("mailto:") ? href.slice("mailto:".length) : href;
       if (href && label && label !== href && label !== comparableHref) {
-        insertions.push({ position: link.end, text: ` (${href})`, order: 1 });
+        insertions.push({ position: link.end, text: ` (${href})` });
       }
     }
   }
   return insertions;
 }
 
+function collectAssistantTranscriptRoleInsertions(
+  text: string,
+  options: StripMarkdownOptions,
+): PlainTextInsertion[] {
+  if (options.assistantTranscriptRoleHeaders !== true) {
+    return [];
+  }
+  const prefix = options.assistantTranscriptRolePrefix ?? "[assistant-authored transcript] ";
+  if (!prefix) {
+    return [];
+  }
+  return findAssistantTranscriptRoleHeaderSpans(text).map((span) => ({
+    position: span.start,
+    text: prefix,
+  }));
+}
+
 function applyPlainTextInsertions(text: string, insertions: PlainTextInsertion[]): string {
   if (insertions.length === 0) {
     return text;
   }
-  const sorted = insertions.toSorted((a, b) => a.position - b.position || a.order - b.order);
+  const sorted = insertions.toSorted((a, b) => a.position - b.position);
   let output = "";
   let cursor = 0;
   for (const insertion of sorted) {
@@ -61,7 +67,7 @@ function applyPlainTextInsertions(text: string, insertions: PlainTextInsertion[]
   return output + text.slice(cursor);
 }
 
-/** Parse Markdown once, then project its visible content to readable plain text. */
+/** Parse Markdown, then protect role headers exposed by the final plain-text projection. */
 export function stripMarkdown(text: string, options: StripMarkdownOptions = {}): string {
   const ir = markdownToIR(text, {
     assistantTranscriptRoleHeaders: options.assistantTranscriptRoleHeaders,
@@ -73,5 +79,9 @@ export function stripMarkdown(text: string, options: StripMarkdownOptions = {}):
     preserveSourceBlockSpacing: true,
     tableMode: "bullets",
   });
-  return applyPlainTextInsertions(ir.text, collectPlainTextInsertions(ir, options)).trim();
+  const plainText = applyPlainTextInsertions(ir.text, collectLinkInsertions(ir, options));
+  return applyPlainTextInsertions(
+    plainText,
+    collectAssistantTranscriptRoleInsertions(plainText, options),
+  ).trim();
 }

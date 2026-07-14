@@ -27,16 +27,7 @@ import {
 } from "./ir-spans.js";
 import type { MarkdownTableMode } from "./types.js";
 
-export type {
-  AssistantTranscriptRole,
-  AssistantTranscriptRoleHeaderKind,
-} from "./assistant-transcript.js";
-export type {
-  MarkdownAnnotationSpan,
-  MarkdownLinkSpan,
-  MarkdownStyle,
-  MarkdownStyleSpan,
-} from "./ir-spans.js";
+export type { MarkdownLinkSpan, MarkdownStyle, MarkdownStyleSpan } from "./ir-spans.js";
 
 type ListState = {
   type: "bullet" | "ordered";
