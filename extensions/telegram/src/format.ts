@@ -1426,7 +1426,7 @@ function splitTelegramHtmlChunksRaw(
       !isClosing &&
       (tagName === "figure" ||
         (TELEGRAM_RICH_MEDIA_HTML_TAGS.has(tagName) &&
-          !openTags.some((tag) => tag.name === "figure")));
+          !openTags.some((openTag) => openTag.name === "figure")));
 
     if (!isClosing) {
       const nextCloseLength = isSelfClosing ? 0 : `</${tagName}>`.length;
@@ -1444,7 +1444,7 @@ function splitTelegramHtmlChunksRaw(
       }
     }
 
-    const closesOpenTag = isClosing && openTags.some((tag) => tag.name === tagName);
+    const closesOpenTag = isClosing && openTags.some((openTag) => openTag.name === tagName);
     const closesSuppressedTag =
       isClosing && !closesOpenTag && popLastTagName(suppressedTagNames, tagName);
     if (!closesSuppressedTag) {

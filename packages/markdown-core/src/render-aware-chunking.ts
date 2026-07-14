@@ -1,7 +1,7 @@
 import { avoidTrailingHighSurrogateBreak } from "./chunk-text.js";
 // Markdown Core module implements render aware chunking behavior.
 import { annotateAssistantTranscriptRoleMessageBoundary } from "./ir-annotations.js";
-import { mergeAnnotationSpans } from "./ir-spans.js";
+import { mergeAnnotationSpans, type MarkdownAnnotationSpan } from "./ir-spans.js";
 import {
   chunkMarkdownIR,
   sliceMarkdownIR,
@@ -299,32 +299,35 @@ function mergeAdjacentLinkSpans(links: MarkdownLinkSpan[]): MarkdownLinkSpan[] {
 
 function mergeMarkdownIRChunks(left: MarkdownIR, right: MarkdownIR): MarkdownIR {
   const offset = left.text.length;
-  const annotations = mergeAnnotationSpans([
-    ...(left.annotations ?? []),
-    ...(right.annotations ?? []).map((annotation) => ({
+  const shiftedAnnotations: MarkdownAnnotationSpan[] = [];
+  for (const annotation of right.annotations ?? []) {
+    shiftedAnnotations.push({
       ...annotation,
       start: annotation.start + offset,
       end: annotation.end + offset,
-    })),
-  ]);
+    });
+  }
+  const shiftedStyles: MarkdownStyleSpan[] = [];
+  for (const span of right.styles) {
+    shiftedStyles.push({
+      ...span,
+      start: span.start + offset,
+      end: span.end + offset,
+    });
+  }
+  const shiftedLinks: MarkdownLinkSpan[] = [];
+  for (const link of right.links) {
+    shiftedLinks.push({
+      ...link,
+      start: link.start + offset,
+      end: link.end + offset,
+    });
+  }
+  const annotations = mergeAnnotationSpans([...(left.annotations ?? []), ...shiftedAnnotations]);
   return {
     text: left.text + right.text,
-    styles: mergeAdjacentStyleSpans([
-      ...left.styles,
-      ...right.styles.map((span) => ({
-        ...span,
-        start: span.start + offset,
-        end: span.end + offset,
-      })),
-    ]),
-    links: mergeAdjacentLinkSpans([
-      ...left.links,
-      ...right.links.map((link) => ({
-        ...link,
-        start: link.start + offset,
-        end: link.end + offset,
-      })),
-    ]),
+    styles: mergeAdjacentStyleSpans([...left.styles, ...shiftedStyles]),
+    links: mergeAdjacentLinkSpans([...left.links, ...shiftedLinks]),
     ...(annotations.length > 0 ? { annotations } : {}),
   };
 }
