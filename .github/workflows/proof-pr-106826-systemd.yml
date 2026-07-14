@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 env:
-  BEFORE_SHA: efc12f2e31482aba091030a2a199a622ec0b544f
-  AFTER_SHA: ba32b4a0ee278fbf5d2cdf69f4760d404d390986
+  BEFORE_SHA: 75354578cff2c3686ee29a13b432eb87291b60b0
+  AFTER_SHA: e7bc0538f5ff821fa9ad3fc41128060bbb5c66e3
 
 jobs:
   focused-tests:
@@ -35,32 +35,22 @@ jobs:
           set -euo pipefail
           pnpm test \
             src/gateway/server-startup-config.secrets.test.ts \
-            src/gateway/server-startup-config.breaker-secrets.integration.test.ts
+            src/gateway/server-startup-config.breaker-secrets.integration.test.ts \
+            src/gateway/server-startup-secret-surfaces.test.ts
           pnpm test \
-            src/infra/gateway-boot-lifecycle.test.ts \
-            src/gateway/server-channels.test.ts \
-            src/gateway/server-aux-handlers.test.ts \
-            src/gateway/server-reload-handlers.test.ts \
-            src/gateway/server-methods/channels.start.test.ts
+            src/infra/gateway-boot-lifecycle.test.ts
 
       - name: Run scoped static gates
         run: |
           set -euo pipefail
           git diff --check "$BEFORE_SHA...$AFTER_SHA"
-          pnpm check:loc --base "$BEFORE_SHA" --head "$AFTER_SHA"
+          pnpm check:max-lines-ratchet --base "$BEFORE_SHA"
           pnpm format:check -- \
-            docs/cli/secrets.md \
-            docs/gateway/index.md \
-            src/gateway/server-aux-handlers.ts \
-            src/gateway/server-aux-handlers.test.ts \
-            src/gateway/server-channel-runtime-lifecycle.ts \
-            src/gateway/server-channels.ts \
-            src/gateway/server-channels.test.ts \
-            src/gateway/server-secrets-reload-channels.ts \
-            src/gateway/server-startup-config.ts \
-            src/gateway/server.impl.ts \
             src/gateway/server-startup-config.breaker-secrets.integration.test.ts \
-            src/gateway/server-startup-secret-surfaces.ts
+            src/gateway/server-startup-config.ts \
+            src/gateway/server-startup-secret-surfaces.test.ts \
+            src/gateway/server-startup-secret-surfaces.ts \
+            src/gateway/server.impl.ts
 
   systemd-proof:
     name: systemd ${{ matrix.label }}
@@ -71,15 +61,15 @@ jobs:
       matrix:
         include:
           - label: before-channel-secret
-            ref: efc12f2e31482aba091030a2a199a622ec0b544f
+            ref: 75354578cff2c3686ee29a13b432eb87291b60b0
             scenario: channel
             expected: unavailable
           - label: after-channel-secret
-            ref: ba32b4a0ee278fbf5d2cdf69f4760d404d390986
+            ref: e7bc0538f5ff821fa9ad3fc41128060bbb5c66e3
             scenario: channel
             expected: converged
           - label: after-gateway-auth-secret
-            ref: ba32b4a0ee278fbf5d2cdf69f4760d404d390986
+            ref: e7bc0538f5ff821fa9ad3fc41128060bbb5c66e3
             scenario: gateway-auth
             expected: unavailable
     steps:
@@ -144,11 +134,9 @@ jobs:
           telegram_port="$(node -e "const n=require('node:net');const s=n.createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})")"
           proof_auth="proof-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RANDOM}"
           alpha_v1="100001:proof-alpha-v1"
-          alpha_v2="100001:proof-alpha-v2"
           beta_v1="100002:proof-beta-v1"
           echo "::add-mask::$proof_auth"
           echo "::add-mask::$alpha_v1"
-          echo "::add-mask::$alpha_v2"
           echo "::add-mask::$beta_v1"
 
           cat > "$RUNNER_TEMP/telegram-proof-server.mjs" <<'NODE'
@@ -335,6 +323,8 @@ jobs:
               sleep 1
             done
 
+            pid_before_recovery="$(systemctl --user show "$unit" -p MainPID --value)"
+            restarts_before_recovery="$(systemctl --user show "$unit" -p NRestarts --value)"
             printf '%s\n' \
               "{\"alphaToken\":\"${alpha_v1}\",\"betaToken\":\"${beta_v1}\"}" \
               > "${secret_path}.tmp"
@@ -343,7 +333,7 @@ jobs:
             node dist/entry.js secrets reload \
               --url "ws://127.0.0.1:${gateway_port}" \
               --token "$proof_auth" \
-              --json > "$artifact_dir/secrets-reload-v1.json"
+              --json > "$artifact_dir/secrets-reload.json"
             node dist/entry.js gateway call channels.status \
               --params '{"probe":false}' \
               --url "ws://127.0.0.1:${gateway_port}" \
@@ -355,7 +345,6 @@ jobs:
               --token "$proof_auth" \
               --json > "$artifact_dir/start-alpha.json"
             alpha_v1_hash="$(node -e 'const c=require("node:crypto");process.stdout.write(c.createHash("sha256").update(process.argv[1]).digest("hex"))' "$alpha_v1")"
-            alpha_v2_hash="$(node -e 'const c=require("node:crypto");process.stdout.write(c.createHash("sha256").update(process.argv[1]).digest("hex"))' "$alpha_v2")"
             for _ in $(seq 1 100); do
               observed_v1="$(node -e '
                 const fs = require("node:fs");
@@ -368,38 +357,14 @@ jobs:
               sleep 0.1
             done
             test "$observed_v1" -ge 1
-
-            pid_before_rotation="$(systemctl --user show "$unit" -p MainPID --value)"
-            restarts_before_rotation="$(systemctl --user show "$unit" -p NRestarts --value)"
-            printf '%s\n' \
-              "{\"alphaToken\":\"${alpha_v2}\",\"betaToken\":\"${beta_v1}\"}" \
-              > "${secret_path}.tmp"
-            chmod 600 "${secret_path}.tmp"
-            mv "${secret_path}.tmp" "$secret_path"
-            node dist/entry.js secrets reload \
-              --url "ws://127.0.0.1:${gateway_port}" \
-              --token "$proof_auth" \
-              --json > "$artifact_dir/secrets-reload-v2.json"
-            for _ in $(seq 1 100); do
-              observed_v2="$(node -e '
-                const fs = require("node:fs");
-                const path = process.argv[1];
-                const expected = process.argv[2];
-                const lines = fs.existsSync(path) ? fs.readFileSync(path, "utf8").trim().split("\n").filter(Boolean) : [];
-                console.log(lines.map(JSON.parse).filter((event) => event.tokenSha256 === expected).length);
-              ' "$telegram_events" "$alpha_v2_hash")"
-              test "$observed_v2" -ge 1 && break
-              sleep 0.1
-            done
-            test "$observed_v2" -ge 1
             sleep 1
             node dist/entry.js gateway call channels.status \
               --params '{"probe":false}' \
               --url "ws://127.0.0.1:${gateway_port}" \
               --token "$proof_auth" \
               --json > "$artifact_dir/channels-status-final.json"
-            pid_after_rotation="$(systemctl --user show "$unit" -p MainPID --value)"
-            restarts_after_rotation="$(systemctl --user show "$unit" -p NRestarts --value)"
+            pid_after_recovery="$(systemctl --user show "$unit" -p MainPID --value)"
+            restarts_after_recovery="$(systemctl --user show "$unit" -p NRestarts --value)"
           else
             sleep 45
           fi
@@ -437,11 +402,12 @@ jobs:
             echo "restarts_before_stability_window=$restarts_before"
             echo "restarts_after_stability_window=$restarts_after"
             if [[ "$PROOF_EXPECTED" == "converged" ]]; then
-              echo "pid_before_rotation=$pid_before_rotation"
-              echo "pid_after_rotation=$pid_after_rotation"
-              echo "restarts_before_rotation=$restarts_before_rotation"
-              echo "restarts_after_rotation=$restarts_after_rotation"
-              echo "safe_mode_running_account_rotation=success"
+              echo "pid_before_recovery=$pid_before_recovery"
+              echo "pid_after_recovery=$pid_after_recovery"
+              echo "restarts_before_recovery=$restarts_before_recovery"
+              echo "restarts_after_recovery=$restarts_after_recovery"
+              echo "safe_mode_reload_recovery=success"
+              echo "safe_mode_explicit_account_start=success"
               echo "safe_mode_stopped_sibling_preserved=success"
             fi
             echo "systemd_version=$(systemctl --version | head -1)"
@@ -454,7 +420,6 @@ jobs:
             -e "s#${HOME}#<home>#g" \
             -e "s#${proof_auth}#<redacted>#g" \
             -e "s#${alpha_v1}#<redacted>#g" \
-            -e "s#${alpha_v2}#<redacted>#g" \
             -e "s#${beta_v1}#<redacted>#g" \
             "$artifact_dir/journal.raw" > "$artifact_dir/journal.txt"
           rm "$artifact_dir/journal.raw" "$artifact_dir/install.json"
@@ -466,8 +431,8 @@ jobs:
             test "$active_state" = "active"
             test "$sub_state" = "running"
             test "$restarts_before" -eq "$restarts_after"
-            test "$pid_before_rotation" = "$pid_after_rotation"
-            test "$restarts_before_rotation" -eq "$restarts_after_rotation"
+            test "$pid_before_recovery" = "$pid_after_recovery"
+            test "$restarts_before_recovery" -eq "$restarts_after_recovery"
             curl -fsS "http://127.0.0.1:${gateway_port}/healthz" >/dev/null
             curl -fsS "http://127.0.0.1:${gateway_port}/readyz" >/dev/null
             node dist/entry.js gateway status \
@@ -476,27 +441,23 @@ jobs:
               --require-rpc \
               --timeout 30000 \
               --json >/dev/null
-            grep -Fq "restarting telegram:alpha channel after secrets reload" "$artifact_dir/journal.txt"
-            if grep -Fq "restarting telegram:beta channel after secrets reload" "$artifact_dir/journal.txt"; then
-              echo "stopped beta account was restarted" >&2
+            if grep -Fq "restarting telegram" "$artifact_dir/journal.txt"; then
+              echo "safe-mode secrets.reload restarted a channel automatically" >&2
               exit 1
             fi
             node - \
-              "$artifact_dir/secrets-reload-v1.json" \
-              "$artifact_dir/secrets-reload-v2.json" \
+              "$artifact_dir/secrets-reload.json" \
               "$artifact_dir/start-alpha.json" \
               "$artifact_dir/channels-status-before-start.json" \
               "$artifact_dir/channels-status-final.json" \
               "$telegram_events" \
               "$alpha_v1" \
-              "$alpha_v2" \
               "$beta_v1" <<'NODE'
           const crypto = require("node:crypto");
           const fs = require("node:fs");
           const readJson = (path) => JSON.parse(fs.readFileSync(path, "utf8"));
-          const [reloadV1Path, reloadV2Path, startPath, beforeStatusPath, finalStatusPath, eventsPath, alphaV1, alphaV2, betaV1] = process.argv.slice(2);
-          const reloadV1 = readJson(reloadV1Path);
-          const reloadV2 = readJson(reloadV2Path);
+          const [reloadPath, startPath, beforeStatusPath, finalStatusPath, eventsPath, alphaV1, betaV1] = process.argv.slice(2);
+          const reload = readJson(reloadPath);
           const start = readJson(startPath);
           const beforeStatus = readJson(beforeStatusPath);
           const finalStatus = readJson(finalStatusPath);
@@ -507,8 +468,8 @@ jobs:
           };
           const findAccount = (status, accountId) => accounts(status).find((account) => account.accountId === accountId);
           const digest = (value) => crypto.createHash("sha256").update(value).digest("hex");
-          if (reloadV1.ok !== true || reloadV2.ok !== true) {
-            throw new Error("secrets.reload did not succeed twice");
+          if (reload.ok !== true) {
+            throw new Error(`secrets.reload did not succeed: ${JSON.stringify(reload)}`);
           }
           if (start.channel !== "telegram" || start.accountId !== "alpha" || start.started !== true) {
             throw new Error(`unexpected channels.start result: ${JSON.stringify(start)}`);
@@ -525,19 +486,10 @@ jobs:
             throw new Error(`unexpected final channel state: ${JSON.stringify({ finalAlpha, finalBeta })}`);
           }
           const alphaV1Hash = digest(alphaV1);
-          const alphaV2Hash = digest(alphaV2);
           const betaV1Hash = digest(betaV1);
           const alphaV1Events = events.filter((event) => event.tokenSha256 === alphaV1Hash);
-          const alphaV2Events = events.filter((event) => event.tokenSha256 === alphaV2Hash);
           if (!alphaV1Events.some((event) => event.method === "getMe")) {
             throw new Error(`alpha v1 never reached Telegram getMe: ${JSON.stringify(events)}`);
-          }
-          if (!alphaV2Events.some((event) => event.method === "getMe")) {
-            throw new Error(`alpha v2 never reached Telegram getMe: ${JSON.stringify(events)}`);
-          }
-          const firstV2Sequence = Math.min(...alphaV2Events.map((event) => event.sequence));
-          if (alphaV1Events.some((event) => event.sequence > firstV2Sequence)) {
-            throw new Error("old Telegram credential remained active after the v2 worker started");
           }
           if (events.some((event) => event.tokenSha256 === betaV1Hash)) {
             throw new Error("stopped beta account reached the Telegram API server");
