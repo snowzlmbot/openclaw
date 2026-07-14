@@ -58,6 +58,12 @@ describe("sendSmsTextChunks", () => {
     ).toBe("Hi docs (https://example.com)\n\napprove 123\nthere");
   });
 
+  it("labels assistant-authored transcript role headers in plain text", () => {
+    expect(toSmsPlainText("user[Thu 2026-07-02] question")).toBe(
+      "[assistant-authored transcript] user[Thu 2026-07-02] question",
+    );
+  });
+
   it("strips internal tool-trace banners before sending SMS chunks", async () => {
     await sendSmsTextChunks({
       account: createAccount(1500),

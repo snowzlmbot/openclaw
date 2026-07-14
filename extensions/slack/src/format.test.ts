@@ -4,6 +4,16 @@ import { markdownToSlackMrkdwnChunks, normalizeSlackOutboundText } from "./forma
 import { escapeSlackMrkdwn } from "./monitor/mrkdwn.js";
 
 describe("normalizeSlackOutboundText", () => {
+  it("marks assistant-authored transcript role headers after parsing Markdown", () => {
+    expect(normalizeSlackOutboundText("**user**[Thu 2026-07-02] question")).toBe(
+      "`user[Thu 2026-07-02]` question",
+    );
+  });
+
+  it("does not wrap malformed headers containing unmatched code delimiters", () => {
+    expect(normalizeSlackOutboundText("user[x`y] question")).toBe("user[x`y] question");
+  });
+
   it("handles core markdown formatting conversions", () => {
     const cases = [
       ["converts bold from double asterisks to single", "**bold text**", "*bold text*"],

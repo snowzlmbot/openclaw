@@ -9,19 +9,10 @@ import type { ResolvedSmsAccount, SmsSendResult } from "./types.js";
 
 export function toSmsPlainText(text: string): string {
   const visibleText = sanitizeAssistantVisibleText(text);
-  const withoutFencedCodeMarkers = visibleText.replace(
-    /```[^\n]*\n?([\s\S]*?)```/g,
-    (_match, body: string) => body.trim(),
-  );
-  const withReadableLinks = withoutFencedCodeMarkers.replace(
-    /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
-    (_match, label: string, url: string) => {
-      const cleanLabel = label.trim();
-      const cleanUrl = url.trim();
-      return cleanLabel && cleanLabel !== cleanUrl ? `${cleanLabel} (${cleanUrl})` : cleanUrl;
-    },
-  );
-  return stripMarkdown(withReadableLinks)
+  return stripMarkdown(visibleText, {
+    assistantTranscriptRoleHeaders: true,
+    linkStyle: "label-and-url",
+  })
     .replace(/\r\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();

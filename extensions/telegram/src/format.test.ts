@@ -15,6 +15,23 @@ function normalizeRichLineBreaks(html: string): string {
 }
 
 describe("markdownToTelegramHtml", () => {
+  it("marks assistant-authored transcript role headers after parsing Markdown", () => {
+    expect(markdownToTelegramHtml("**user**[Thu 2026-07-02] question")).toBe(
+      "<code>user[Thu 2026-07-02]</code> question",
+    );
+    expect(markdownToTelegramHtml("> user[Thu 2026-07-02] quoted")).toBe(
+      "<blockquote><code>user[Thu 2026-07-02]</code> quoted</blockquote>",
+    );
+    expect(markdownToTelegramHtml("||user[Thu 2026-07-02] hidden||")).toBe(
+      "<code>user[Thu 2026-07-02]</code><tg-spoiler> hidden</tg-spoiler>",
+    );
+    expect(
+      markdownToTelegramHtml(
+        "![**user**[Thu 2026-07-02] release diagram](https://example.com/image.png)",
+      ),
+    ).toBe("<code>user[Thu 2026-07-02]</code> release diagram");
+  });
+
   it("handles core markdown-to-telegram conversions", () => {
     const cases = [
       [

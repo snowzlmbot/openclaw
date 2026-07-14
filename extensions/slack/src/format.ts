@@ -182,6 +182,13 @@ function hardSliceSlackToken(token: string, limit: number): string[] {
 
 function buildSlackRenderOptions() {
   return {
+    annotationMarkers: {
+      assistant_transcript_role: {
+        open: "`",
+        close: "`",
+        suppressNestedFormatting: true,
+      },
+    },
     styleMarkers: {
       bold: { open: "*", close: "*" },
       italic: { open: "_", close: "_" },
@@ -196,6 +203,7 @@ function buildSlackRenderOptions() {
 
 function markdownToSlackMrkdwn(markdown: string, options: SlackMarkdownOptions = {}): string {
   const ir = markdownToIR(markdown ?? "", {
+    assistantTranscriptRoleHeaders: true,
     linkify: false,
     autolink: false,
     headingStyle: "bold",
@@ -282,6 +290,7 @@ export function markdownToSlackMrkdwnChunks(
   options: SlackMarkdownOptions = {},
 ): string[] {
   const ir = markdownToIR(markdown ?? "", {
+    assistantTranscriptRoleHeaders: true,
     linkify: false,
     autolink: false,
     headingStyle: "bold",

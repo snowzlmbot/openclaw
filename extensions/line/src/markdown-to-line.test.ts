@@ -186,7 +186,7 @@ describe("stripMarkdown", () => {
       ["strips italic *", "This is *italic* text", "This is italic text"],
       ["strips italic _", "This is _italic_ text", "This is italic text"],
       ["strips strikethrough", "This is ~~deleted~~ text", "This is deleted text"],
-      ["removes hr ---", "Above\n---\nBelow", "Above\n\nBelow"],
+      ["strips setext heading underline", "Above\n---\nBelow", "Above\nBelow"],
       ["removes hr ***", "Above\n***\nBelow", "Above\n\nBelow"],
       ["strips inline code markers", "Use `const` keyword", "Use const keyword"],
     ] as const;

@@ -18,6 +18,7 @@ import yaml from "highlight.js/lib/languages/yaml";
 import MarkdownIt from "markdown-it";
 import markdownItTaskLists from "markdown-it-task-lists";
 import remend, { type RemendOptions } from "remend";
+import type { AssistantTranscriptRoleImageMeta } from "../../../packages/markdown-core/src/assistant-transcript.js";
 import { stripUnsupportedCitationControlMarkers } from "../../../src/shared/text/citation-control-markers.js";
 import { routeIdFromPath } from "../app-route-paths.ts";
 import { resolveControlUiBasePath } from "../app/browser.ts";
@@ -25,6 +26,11 @@ import { i18n, t } from "../i18n/index.ts";
 import { copyToClipboard } from "../lib/clipboard.ts";
 import { truncateText } from "../lib/format.ts";
 import { normalizeLowercaseStringOrEmpty } from "../lib/string-coerce.ts";
+import {
+  installAssistantTranscriptRoleMarkdown,
+  renderAssistantTranscriptRoleImageLabel,
+  renderAssistantTranscriptRoleMarker,
+} from "./markdown-assistant-transcript.ts";
 
 const allowedTags = [
   "a",
@@ -402,14 +408,12 @@ const FENCE_CONTAINER_PREFIX_RE = /^[ \t]{0,3}(?:(?:>\s?)|(?:(?:[-+*]|\d{1,9}[.)
 type MarkdownCodeBlockChrome = "copy" | "none";
 
 export type MarkdownRenderOptions = {
+  assistantTranscriptRoleHeaders?: boolean;
   codeBlockChrome?: MarkdownCodeBlockChrome;
   fileLinks?: boolean;
 };
 
-type MarkdownRenderEnv = {
-  codeBlockChrome: MarkdownCodeBlockChrome;
-  fileLinks: boolean;
-};
+type MarkdownRenderEnv = Required<MarkdownRenderOptions>;
 
 // CJK character ranges for URL boundary detection (RFC 3986: CJK is not valid in raw URLs).
 // CJK Unified Ideographs, CJK Symbols/Punctuation, Fullwidth Forms, Hiragana, Katakana,
@@ -441,6 +445,7 @@ function setCachedMarkdown(key: string, value: string) {
 
 function normalizeMarkdownRenderOptions(options: MarkdownRenderOptions = {}): MarkdownRenderEnv {
   return {
+    assistantTranscriptRoleHeaders: options.assistantTranscriptRoleHeaders ?? false,
     codeBlockChrome: options.codeBlockChrome ?? "copy",
     fileLinks: options.fileLinks ?? false,
   };
@@ -957,6 +962,7 @@ const defaultCodeInlineRenderer = md.renderer.rules.code_inline!;
 // Enable GFM strikethrough (~~text~~) to match original marked.js behavior.
 // markdown-it uses <s> tags; we added "s" to allowedTags for DOMPurify.
 md.enable("strikethrough");
+installAssistantTranscriptRoleMarkdown(md, escapeHtml);
 
 // Disable fuzzy link detection to prevent bare filenames like "README.md"
 // from being auto-linked as "http://README.md". URLs with explicit protocol
@@ -1294,7 +1300,6 @@ md.renderer.rules.html_inline = (tokens, idx) => {
   const token = tokens[idx];
   return token?.meta?.taskListPlugin === true ? token.content : escapeHtml(token?.content ?? "");
 };
-
 md.renderer.rules.code_inline = (tokens, idx, options, env, self) => {
   const rendered = defaultCodeInlineRenderer(tokens, idx, options, env, self);
   const renderEnv = env as Partial<MarkdownRenderEnv> | undefined;
@@ -1318,10 +1323,19 @@ md.renderer.rules.image = (tokens, idx) => {
   // Use token.content which preserves raw markdown formatting (e.g. **bold**)
   // to match original marked.js behavior.
   const alt = normalizeMarkdownImageLabel(token.content);
+  const roleMeta = (token.meta as AssistantTranscriptRoleImageMeta | undefined)
+    ?.assistantTranscriptRoleImage;
   if (!INLINE_DATA_IMAGE_RE.test(src)) {
-    return escapeHtml(alt);
+    return roleMeta
+      ? renderAssistantTranscriptRoleImageLabel(roleMeta.text, roleMeta.spans, escapeHtml)
+      : escapeHtml(alt);
   }
-  return `<img class="markdown-inline-image" src="${escapeHtml(src)}" alt="${escapeHtml(alt)}">`;
+  const image = `<img class="markdown-inline-image" src="${escapeHtml(src)}" alt="${escapeHtml(alt)}">`;
+  if (!roleMeta) {
+    return image;
+  }
+  const label = t("sessionsView.assistant");
+  return `${renderAssistantTranscriptRoleMarker(`${label}:`, escapeHtml)} ${image}`;
 };
 
 // Override fenced code blocks with copy button + JSON collapse
@@ -1366,7 +1380,7 @@ function renderSanitizedMarkdown(renderInput: string, renderOptions: MarkdownRen
     // Large plain-text replies should stay readable without inheriting the
     // capped code-block chrome, while still preserving whitespace for logs
     // and other structured text that commonly trips the parse guard.
-    return DOMPurify.sanitize(toEscapedPlainTextHtml(input), sanitizeOptions);
+    return DOMPurify.sanitize(toEscapedPlainTextHtml(input, renderOptions), sanitizeOptions);
   }
   let rendered: string;
   try {
@@ -1374,7 +1388,7 @@ function renderSanitizedMarkdown(renderInput: string, renderOptions: MarkdownRen
   } catch (err) {
     // Fall back to escaped plain text when md.render() throws (#36213).
     console.warn("[markdown] md.render failed, falling back to plain text:", err);
-    rendered = `<pre class="code-block">${escapeHtml(input)}</pre>`;
+    rendered = toEscapedPlainTextHtml(input, renderOptions);
   }
   return DOMPurify.sanitize(rendered, sanitizeOptions);
 }
@@ -1393,7 +1407,7 @@ export function toSanitizedMarkdownHtml(
   }
   const renderInput = isMarkdownBlockArtText(rawInput) ? rawInput : input;
   const cacheable = input.length <= MARKDOWN_CACHE_MAX_CHARS;
-  const cacheKey = `${i18n.getLocale()}\0${renderOptions.codeBlockChrome}\0${renderOptions.fileLinks}\0${renderInput}`;
+  const cacheKey = `${i18n.getLocale()}\0${renderOptions.assistantTranscriptRoleHeaders}\0${renderOptions.codeBlockChrome}\0${renderOptions.fileLinks}\0${renderInput}`;
   if (cacheable) {
     const cached = getCachedMarkdown(cacheKey);
     if (cached !== null) {
@@ -1407,8 +1421,15 @@ export function toSanitizedMarkdownHtml(
   return sanitized;
 }
 
-function toEscapedPlainTextHtml(value: string): string {
-  return `<div class="markdown-plain-text-fallback">${escapeHtml(normalizeMarkdownLineBreaks(value))}</div>`;
+function toEscapedPlainTextHtml(value: string, options: MarkdownRenderEnv): string {
+  const normalized = normalizeMarkdownLineBreaks(value);
+  const escaped = escapeHtml(normalized);
+  if (!options.assistantTranscriptRoleHeaders) {
+    return `<div class="markdown-plain-text-fallback">${escaped}</div>`;
+  }
+  const label = t("sessionsView.assistant");
+  const marker = renderAssistantTranscriptRoleMarker(`${label}:`, escapeHtml);
+  return `<div class="markdown-plain-text-fallback">${marker}\n<span class="markdown-plain-text-source">${escaped}</span></div>`;
 }
 
 // Streaming-tail repair config: math is not rendered by this pipeline, so

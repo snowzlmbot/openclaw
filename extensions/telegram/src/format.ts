@@ -12,9 +12,9 @@ import {
   type MarkdownTableCell,
   type MarkdownTableMeta,
   renderMarkdownIRChunksWithinLimit,
-  renderMarkdownWithMarkers,
   sliceMarkdownIR,
 } from "openclaw/plugin-sdk/text-chunking";
+import { renderTelegramMarkdownIR } from "./format-render.js";
 
 export type TelegramFormattedChunk = {
   html: string;
@@ -92,24 +92,10 @@ function buildTelegramCodeBlockOpen(span: { language?: string }): string {
 }
 
 function renderTelegramHtml(ir: MarkdownIR): string {
-  return renderMarkdownWithMarkers(ir, {
-    styleMarkers: {
-      bold: { open: "<b>", close: "</b>" },
-      italic: { open: "<i>", close: "</i>" },
-      strikethrough: { open: "<s>", close: "</s>" },
-      code: { open: "<code>", close: "</code>" },
-      code_block: { open: buildTelegramCodeBlockOpen, close: "</code></pre>" },
-      spoiler: { open: "<tg-spoiler>", close: "</tg-spoiler>" },
-      blockquote: { open: "<blockquote>", close: "</blockquote>" },
-      heading_1: { open: "<h1>", close: "</h1>" },
-      heading_2: { open: "<h2>", close: "</h2>" },
-      heading_3: { open: "<h3>", close: "</h3>" },
-      heading_4: { open: "<h4>", close: "</h4>" },
-      heading_5: { open: "<h5>", close: "</h5>" },
-      heading_6: { open: "<h6>", close: "</h6>" },
-    },
+  return renderTelegramMarkdownIR(ir, {
     escapeText: escapeHtml,
     buildLink: buildTelegramLink,
+    buildCodeBlockOpen: buildTelegramCodeBlockOpen,
   });
 }
 
@@ -171,6 +157,7 @@ export function markdownToTelegramHtml(
 ): string {
   const tableMode = options.tableMode === "block" ? "code" : options.tableMode;
   const ir = markdownToIR(preserveTelegramListBoundarySpacing(markdown ?? ""), {
+    assistantTranscriptRoleHeaders: true,
     linkify: true,
     enableSpoilers: true,
     headingStyle: "none",
@@ -1341,6 +1328,7 @@ export function markdownToTelegramRichHtml(
   const { ir, tables } = markdownToIRWithMeta(
     preserveTelegramListBoundarySpacing(normalized.markdown),
     {
+      assistantTranscriptRoleHeaders: true,
       linkify: options.skipEntityDetection !== true,
       enableSpoilers: true,
       headingStyle: "rich",
@@ -1658,6 +1646,7 @@ export function markdownToTelegramChunks(
   options: { tableMode?: MarkdownTableMode } = {},
 ): TelegramFormattedChunk[] {
   const ir = markdownToIR(preserveTelegramListBoundarySpacing(markdown ?? ""), {
+    assistantTranscriptRoleHeaders: true,
     linkify: true,
     enableSpoilers: true,
     headingStyle: "none",
