@@ -8,14 +8,14 @@ import {
 const ROLE_MARKER_OPEN = '<code class="assistant-transcript-role">';
 const ROLE_MARKER_CLOSE = "</code>";
 
-export function renderAssistantTranscriptRoleMarker(
+function renderAssistantTranscriptRoleMarker(
   text: string,
   escapeHtml: (value: string) => string,
 ): string {
   return `${ROLE_MARKER_OPEN}${escapeHtml(text)}${ROLE_MARKER_CLOSE}`;
 }
 
-export function renderAssistantTranscriptRoleImageLabel(
+function renderAssistantTranscriptRoleImageLabel(
   text: string,
   spans: ReadonlyArray<{ start: number; end: number }>,
   escapeHtml: (value: string) => string,

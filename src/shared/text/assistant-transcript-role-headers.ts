@@ -1,6 +1,6 @@
 import { markdownToIR } from "../../../packages/markdown-core/src/ir.js";
 
-export type AssistantTranscriptRoleHeaderDetection = {
+type AssistantTranscriptRoleHeaderDetection = {
   kind: "angle_role_header" | "role_timestamp_bracket" | "timestamp_role_colon";
   role: "assistant" | "developer" | "system" | "user";
 };
