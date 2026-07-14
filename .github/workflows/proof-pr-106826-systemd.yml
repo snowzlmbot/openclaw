@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 env:
-  BEFORE_SHA: 75354578cff2c3686ee29a13b432eb87291b60b0
-  AFTER_SHA: e7bc0538f5ff821fa9ad3fc41128060bbb5c66e3
+  BEFORE_SHA: 352473cc36d29219919c478b0af3d406c4349bda
+  AFTER_SHA: a76d92caa94392442368480aa3555535b51e153a
 
 jobs:
   focused-tests:
@@ -61,15 +61,15 @@ jobs:
       matrix:
         include:
           - label: before-channel-secret
-            ref: 75354578cff2c3686ee29a13b432eb87291b60b0
+            ref: 352473cc36d29219919c478b0af3d406c4349bda
             scenario: channel
             expected: unavailable
           - label: after-channel-secret
-            ref: e7bc0538f5ff821fa9ad3fc41128060bbb5c66e3
+            ref: a76d92caa94392442368480aa3555535b51e153a
             scenario: channel
             expected: converged
           - label: after-gateway-auth-secret
-            ref: e7bc0538f5ff821fa9ad3fc41128060bbb5c66e3
+            ref: a76d92caa94392442368480aa3555535b51e153a
             scenario: gateway-auth
             expected: unavailable
     steps:
@@ -282,9 +282,24 @@ jobs:
           chmod 600 "$config_path"
 
           cleanup() {
+            status=$?
+            if [[ "$status" -ne 0 && -n "${started_at:-}" ]]; then
+              echo "::group::Sanitized service journal"
+              journalctl --user -u "$unit" --since "$started_at" --no-pager 2>/dev/null | \
+                sed \
+                  -e "s#${GITHUB_WORKSPACE}#<workspace>#g" \
+                  -e "s#${RUNNER_TEMP}#<runner-temp>#g" \
+                  -e "s#${HOME}#<home>#g" \
+                  -e "s#${proof_auth}#<redacted>#g" \
+                  -e "s#${alpha_v1}#<redacted>#g" \
+                  -e "s#${beta_v1}#<redacted>#g" | \
+                tail -n 200 || true
+              echo "::endgroup::"
+            fi
             systemctl --user stop "$unit" >/dev/null 2>&1 || true
             kill "$telegram_server_pid" >/dev/null 2>&1 || true
             wait "$telegram_server_pid" >/dev/null 2>&1 || true
+            exit "$status"
           }
           trap cleanup EXIT
 
@@ -322,6 +337,11 @@ jobs:
               fi
               sleep 1
             done
+            systemctl --user is-active --quiet "$unit"
+            curl -fsS "http://127.0.0.1:${gateway_port}/healthz" >/dev/null
+            curl -fsS "http://127.0.0.1:${gateway_port}/readyz" >/dev/null
+            journalctl --user -u "$unit" --since "$started_at" --no-pager | \
+              grep -Fq "restart-loop breaker tripped"
 
             pid_before_recovery="$(systemctl --user show "$unit" -p MainPID --value)"
             restarts_before_recovery="$(systemctl --user show "$unit" -p NRestarts --value)"
