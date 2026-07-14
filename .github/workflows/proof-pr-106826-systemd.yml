@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 env:
-  BEFORE_SHA: 7fa99357ae01604392cd0816c7dd591180ee8dee
-  AFTER_SHA: 3b5306c16e337b3e5d9409ce066ef7acf76d55f3
+  BEFORE_SHA: 3b9c0efadd956ef49887f8d54a7366521df5033a
+  AFTER_SHA: 29698d5ba05e78f35fdb4e50957a6bc821fba7cd
 
 jobs:
   focused-tests:
@@ -71,15 +71,15 @@ jobs:
       matrix:
         include:
           - label: before-channel-secret
-            ref: 7fa99357ae01604392cd0816c7dd591180ee8dee
+            ref: 3b9c0efadd956ef49887f8d54a7366521df5033a
             scenario: channel
             expected: unavailable
           - label: after-channel-secret
-            ref: 3b5306c16e337b3e5d9409ce066ef7acf76d55f3
+            ref: 29698d5ba05e78f35fdb4e50957a6bc821fba7cd
             scenario: channel
             expected: converged
           - label: after-gateway-auth-secret
-            ref: 3b5306c16e337b3e5d9409ce066ef7acf76d55f3
+            ref: 29698d5ba05e78f35fdb4e50957a6bc821fba7cd
             scenario: gateway-auth
             expected: unavailable
     steps:
