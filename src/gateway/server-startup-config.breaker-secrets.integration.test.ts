@@ -83,13 +83,13 @@ describe("gateway breaker SecretRef integration", () => {
             gateway: {
               auth: {
                 mode: "token",
-                token: gatewayTokenRef,
+                token: { ...gatewayTokenRef },
               },
             },
             channels: {
               telegram: {
                 enabled: true,
-                botToken: channelTokenRef,
+                botToken: { ...channelTokenRef },
               },
             },
           });
