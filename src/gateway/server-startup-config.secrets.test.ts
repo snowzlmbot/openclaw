@@ -739,6 +739,32 @@ describe("gateway startup config secret preflight", () => {
     },
   );
 
+  it("keeps missing optional TTS SecretRefs fail-closed during non-activating startup preparation", async () => {
+    const missingSecretError = new Error(
+      'Environment variable "ELEVENLABS_API_KEY" is missing or empty.',
+    );
+    const prepareRuntimeSecretsSnapshot = vi.fn(async () => {
+      throw missingSecretError;
+    });
+    const activateRuntimeSecretsSnapshot = vi.fn();
+    const activateRuntimeSecrets = runtimeSecretsActivatorForTest({
+      prepareRuntimeSecretsSnapshot,
+      activateRuntimeSecretsSnapshot,
+    });
+
+    await expect(
+      activateRuntimeSecrets(gatewayTokenConfig({}), {
+        reason: "startup",
+        activate: false,
+      }),
+    ).rejects.toThrow("Startup failed: required secrets are unavailable.");
+
+    expect(prepareRuntimeSecretsSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ allowUnavailableOptionalSecrets: false }),
+    );
+    expect(activateRuntimeSecretsSnapshot).not.toHaveBeenCalled();
+  });
+
   it("does not enable cold-start degradation while a runtime snapshot is active", async () => {
     activateSecretsRuntimeSnapshotForTest(preparedSnapshot(gatewayTokenConfig({})));
     const missingSecretError = new Error(
