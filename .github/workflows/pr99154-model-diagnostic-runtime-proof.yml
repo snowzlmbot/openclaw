@@ -154,15 +154,108 @@ jobs:
             return { ...result, passed: result.passed && partialReads === 0, partialReads };
           }
 
-          async function runToJsonProxyEdge(): Promise<EdgeResult> {
+          async function runNonEnumerableToJsonObjectRestEdge(
+            placement: "own" | "inherited",
+          ): Promise<EdgeResult> {
+            let calls = 0;
             let partialReads = 0;
-            let ignoredReads = 0;
-            const chunk = { type: "metadata", value: "kept" } as Record<string, unknown>;
-            Object.defineProperty(chunk, "ignoredThrowing", {
+            const toJSON = () => {
+              calls += 1;
+              return { changed: true };
+            };
+            const prototype = placement === "inherited" ? {} : Object.prototype;
+            if (placement === "inherited") {
+              Object.defineProperty(prototype, "toJSON", { value: toJSON });
+            }
+            const chunk = Object.assign(Object.create(prototype), {
+              type: "metadata",
+              value: "kept",
+            }) as Record<string, unknown>;
+            if (placement === "own") {
+              Object.defineProperty(chunk, "toJSON", { value: toJSON });
+            }
+            Object.defineProperty(chunk, "partial", {
+              configurable: true,
               enumerable: true,
               get() {
-                ignoredReads += 1;
-                throw new Error("toJSON proxy edge should not eagerly read other getters");
+                partialReads += 1;
+                throw new Error("object-rest edge should not read partial");
+              },
+            });
+            const result = await runEdge(
+              `tojson-${placement}-non-enumerable`,
+              chunk,
+              Buffer.byteLength(JSON.stringify({ type: "metadata", value: "kept" }), "utf8"),
+            );
+            return {
+              ...result,
+              passed: result.passed && calls === 0 && partialReads === 0,
+              calls,
+              partialReads,
+            };
+          }
+
+          async function runEnumerableToJsonObjectRestEdge(): Promise<EdgeResult> {
+            let calls = 0;
+            let partialReads = 0;
+            let receiverWasSource = false;
+            let receiverHadPartial = true;
+            const chunk = {
+              type: "metadata",
+              value: "kept",
+              toJSON(this: Record<string, unknown>) {
+                calls += 1;
+                receiverWasSource = this === chunk;
+                receiverHadPartial = Object.hasOwn(this, "partial");
+                return { value: this.value, hasPartial: receiverHadPartial };
+              },
+            } as Record<string, unknown>;
+            Object.defineProperty(chunk, "partial", {
+              configurable: true,
+              enumerable: true,
+              get() {
+                partialReads += 1;
+                throw new Error("enumerable toJSON edge should not read partial");
+              },
+            });
+            const result = await runEdge(
+              "tojson-own-enumerable",
+              chunk,
+              Buffer.byteLength(JSON.stringify({ value: "kept", hasPartial: false }), "utf8"),
+            );
+            return {
+              ...result,
+              passed:
+                result.passed &&
+                calls === 1 &&
+                partialReads === 0 &&
+                !receiverWasSource &&
+                !receiverHadPartial,
+              calls,
+              partialReads,
+              receiverWasSource,
+              receiverHadPartial,
+            };
+          }
+
+          async function runAccessorReceiverObjectRestEdge(): Promise<EdgeResult> {
+            const symbol = Symbol("metadata");
+            let partialReads = 0;
+            let stringReceiverWasSource = false;
+            let symbolReceiverWasSource = false;
+            const chunk = { type: "metadata" } as Record<PropertyKey, unknown>;
+            Object.defineProperty(chunk, "value", {
+              enumerable: true,
+              get(this: Record<PropertyKey, unknown>) {
+                stringReceiverWasSource = this === chunk;
+                return "kept";
+              },
+            });
+            Object.defineProperty(chunk, symbol, {
+              enumerable: true,
+              get(this: Record<PropertyKey, unknown>) {
+                symbolReceiverWasSource = this === chunk;
+                return "ignored by JSON";
               },
             });
             Object.defineProperty(chunk, "partial", {
@@ -170,76 +263,25 @@ jobs:
               enumerable: true,
               get() {
                 partialReads += 1;
-                throw new Error("toJSON proxy edge should not read partial");
-              },
-            });
-            Object.defineProperty(chunk, "toJSON", {
-              value() {
-                return {
-                  hasPartial: "partial" in (this as Record<string, unknown>),
-                  ownPartial: Object.prototype.hasOwnProperty.call(this, "partial"),
-                  value: (this as Record<string, unknown>).value,
-                };
+                throw new Error("accessor receiver edge should not read partial");
               },
             });
             const result = await runEdge(
-              "tojson-proxy",
-              chunk,
-              Buffer.byteLength(
-                JSON.stringify({ hasPartial: false, ownPartial: false, value: "kept" }),
-                "utf8",
-              ),
+              "accessor-receiver-object-rest",
+              chunk as Record<string, unknown>,
+              Buffer.byteLength(JSON.stringify({ type: "metadata", value: "kept" }), "utf8"),
             );
-            return { ...result, passed: result.passed && partialReads === 0 && ignoredReads === 0, partialReads, ignoredReads };
-          }
-
-          async function runInheritedToJsonProxyEdge(): Promise<EdgeResult> {
-            const prototype = {};
-            Object.defineProperty(prototype, "toJSON", {
-              value() {
-                return { hasPartial: "partial" in (this as Record<string, unknown>), value: (this as Record<string, unknown>).value };
-              },
-            });
-            const chunk = Object.assign(Object.create(prototype), { type: "metadata", value: "kept" }) as Record<string, unknown>;
-            Object.defineProperty(chunk, "partial", { configurable: true, enumerable: true, value: "ignored" });
-            return runEdge(
-              "tojson-inherited-proxy",
-              chunk,
-              Buffer.byteLength(JSON.stringify({ hasPartial: false, value: "kept" }), "utf8"),
-            );
-          }
-
-          async function runToJsonSnapshotEdge(): Promise<EdgeResult> {
-            let ignoredReads = 0;
-            const chunk = Object.assign(Object.create(null), { type: "metadata", value: "kept" }) as Record<string, unknown>;
-            Object.defineProperty(chunk, "__proto__", { enumerable: true, value: { marker: "data-key" } });
-            Object.defineProperty(chunk, "ignoredThrowing", {
-              enumerable: true,
-              get() {
-                ignoredReads += 1;
-                throw new Error("toJSON snapshot edge should not eagerly read other getters");
-              },
-            });
-            Object.defineProperty(chunk, "partial", {
-              configurable: false,
-              enumerable: true,
-              value: { role: "assistant", content: [{ type: "text", text: "ignored" }] },
-            });
-            Object.defineProperty(chunk, "toJSON", {
-              value() {
-                return {
-                  dataProto: (this as Record<string, unknown>).__proto__,
-                  hasPartial: Object.prototype.hasOwnProperty.call(this, "partial"),
-                };
-              },
-            });
-            const result = await runEdge(
-              "tojson-snapshot",
-              chunk,
-              Buffer.byteLength(JSON.stringify({ dataProto: { marker: "data-key" }, hasPartial: false }), "utf8"),
-            );
-            const objectPrototypeClean = (Object.prototype as Record<string, unknown>).marker === undefined;
-            return { ...result, passed: result.passed && ignoredReads === 0 && objectPrototypeClean, ignoredReads, objectPrototypeClean };
+            return {
+              ...result,
+              passed:
+                result.passed &&
+                partialReads === 0 &&
+                stringReceiverWasSource &&
+                symbolReceiverWasSource,
+              partialReads,
+              stringReceiverWasSource,
+              symbolReceiverWasSource,
+            };
           }
 
           async function runProtoDataKeyEdge(): Promise<EdgeResult> {
@@ -433,15 +475,16 @@ jobs:
           }
 
           const partialGetterEdge = await runPartialGetterEdge();
-          const toJsonProxyEdge = await runToJsonProxyEdge();
-          const inheritedToJsonProxyEdge = await runInheritedToJsonProxyEdge();
-          const toJsonSnapshotEdge = await runToJsonSnapshotEdge();
+          const ownNonEnumerableToJsonEdge = await runNonEnumerableToJsonObjectRestEdge("own");
+          const inheritedNonEnumerableToJsonEdge = await runNonEnumerableToJsonObjectRestEdge("inherited");
+          const enumerableToJsonEdge = await runEnumerableToJsonObjectRestEdge();
+          const accessorReceiverEdge = await runAccessorReceiverObjectRestEdge();
           const protoDataKeyEdge = await runProtoDataKeyEdge();
           const valueToJsonKeyEdge = await runValueToJsonKeyEdge();
           const bigIntToJsonKeyEdge = await runBigIntToJsonKeyEdge();
           const syntheticStreamBenchmark = await runSyntheticStreamBenchmark();
           const largePartialGetterBenchmark = await runLargePartialGetterBenchmark();
-          const edgeResults = [partialGetterEdge, toJsonProxyEdge, inheritedToJsonProxyEdge, toJsonSnapshotEdge, protoDataKeyEdge, valueToJsonKeyEdge, bigIntToJsonKeyEdge, largePartialGetterBenchmark];
+          const edgeResults = [partialGetterEdge, ownNonEnumerableToJsonEdge, inheritedNonEnumerableToJsonEdge, enumerableToJsonEdge, accessorReceiverEdge, protoDataKeyEdge, valueToJsonKeyEdge, bigIntToJsonKeyEdge, largePartialGetterBenchmark];
           const result = {
             label,
             commit,
@@ -449,9 +492,10 @@ jobs:
             script: fileURLToPath(import.meta.url),
             expectEdgePass,
             partialGetterEdge,
-            toJsonProxyEdge,
-            inheritedToJsonProxyEdge,
-            toJsonSnapshotEdge,
+            ownNonEnumerableToJsonEdge,
+            inheritedNonEnumerableToJsonEdge,
+            enumerableToJsonEdge,
+            accessorReceiverEdge,
             protoDataKeyEdge,
             valueToJsonKeyEdge,
             bigIntToJsonKeyEdge,
@@ -530,9 +574,10 @@ jobs:
             '',
             edgeLine('Baseline partial getter edge passed', base.partialGetterEdge),
             edgeLine('PR head partial getter edge passed', head.partialGetterEdge),
-            edgeLine('PR head own non-enumerable toJSON proxy edge passed', head.toJsonProxyEdge),
-            edgeLine('PR head inherited toJSON proxy edge passed', head.inheritedToJsonProxyEdge),
-            edgeLine('PR head toJSON snapshot fallback edge passed', head.toJsonSnapshotEdge),
+            edgeLine('PR head own non-enumerable toJSON object-rest edge passed', head.ownNonEnumerableToJsonEdge),
+            edgeLine('PR head inherited non-enumerable toJSON object-rest edge passed', head.inheritedNonEnumerableToJsonEdge),
+            edgeLine('PR head own enumerable toJSON object-rest edge passed', head.enumerableToJsonEdge),
+            edgeLine('PR head accessor receiver object-rest edge passed', head.accessorReceiverEdge),
             edgeLine('PR head own __proto__ data-key edge passed', head.protoDataKeyEdge),
             edgeLine('PR head value-level toJSON(key) edge passed', head.valueToJsonKeyEdge),
             edgeLine('PR head BigInt toJSON(key) edge passed', head.bigIntToJsonKeyEdge),
@@ -561,7 +606,7 @@ jobs:
             '',
             '## Conclusion',
             '',
-            'The PR head preserves diagnostic stream byte accounting without reading accumulated partial snapshots, preserves callable toJSON behavior for own non-enumerable and inherited methods, keeps lazy getters lazy before toJSON, preserves own enumerable __proto__ data keys, and completes the synthetic model-call stream workload successfully.',
+            'The PR head preserves diagnostic stream byte accounting without reading accumulated partial snapshots, matches native object-rest treatment of inherited and non-enumerable toJSON methods, preserves source receivers for enumerable accessors, preserves own enumerable toJSON and __proto__ data-key behavior, and completes the synthetic model-call stream workload successfully.',
             '',
           ];
           fs.writeFileSync('.artifacts/pr99154-proof/summary.md', `${lines.join('\n')}\n`);
