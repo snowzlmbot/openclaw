@@ -6,7 +6,7 @@ function channelConfig(): OpenClawConfig {
   return {
     channels: {
       telegram: {
-        botToken: "test-token",
+        botToken: "example",
       },
     },
   };
