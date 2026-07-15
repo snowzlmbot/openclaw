@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 env:
-  BEFORE_SHA: 352473cc36d29219919c478b0af3d406c4349bda
-  AFTER_SHA: a76d92caa94392442368480aa3555535b51e153a
+  BEFORE_SHA: 894cc604a579051a1738493896364b757deee288
+  AFTER_SHA: eb9ae6a22f12e4d3f0d8bd7e8153d072e735d3e6
 
 jobs:
   focused-tests:
@@ -61,15 +61,15 @@ jobs:
       matrix:
         include:
           - label: before-channel-secret
-            ref: 352473cc36d29219919c478b0af3d406c4349bda
+            ref: 894cc604a579051a1738493896364b757deee288
             scenario: channel
             expected: unavailable
           - label: after-channel-secret
-            ref: a76d92caa94392442368480aa3555535b51e153a
+            ref: eb9ae6a22f12e4d3f0d8bd7e8153d072e735d3e6
             scenario: channel
             expected: converged
           - label: after-gateway-auth-secret
-            ref: a76d92caa94392442368480aa3555535b51e153a
+            ref: eb9ae6a22f12e4d3f0d8bd7e8153d072e735d3e6
             scenario: gateway-auth
             expected: unavailable
     steps:
@@ -255,6 +255,7 @@ jobs:
             },
             "plugins": {
               "enabled": true,
+              "load": { "paths": ["${state_dir}/extensions/telegram"] },
               "entries": { "telegram": { "enabled": true } }
             },
             "cron": { "enabled": false },
