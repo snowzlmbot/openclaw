@@ -1,5 +1,5 @@
-import { markSecretAssignmentOptional } from "./runtime-optional-assignment-metadata.js";
 /** Collects text-to-speech secret refs from runtime config. */
+import { markSecretAssignmentOptional } from "./runtime-optional-assignment-metadata.js";
 import {
   collectSecretInputAssignment,
   type ResolverContext,
