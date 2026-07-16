@@ -4,7 +4,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { collectTtsApiKeyAssignments } from "./runtime-config-collectors-tts.js";
 import { createResolverContext } from "./runtime-shared.js";
 
-const ELEVENLABS_API_KEY_REF = {
+const TTS_KEY_REF = {
   source: "env",
   provider: "default",
   id: "ELEVENLABS_API_KEY",
@@ -22,7 +22,7 @@ describe("collectTtsApiKeyAssignments", () => {
     const tts = {
       providers: {
         elevenlabs: {
-          apiKey: ELEVENLABS_API_KEY_REF,
+          apiKey: TTS_KEY_REF,
         },
       },
     };
@@ -53,7 +53,7 @@ describe("collectTtsApiKeyAssignments", () => {
     const tts = {
       providers: {
         elevenlabs: {
-          apiKey: ELEVENLABS_API_KEY_REF,
+          apiKey: TTS_KEY_REF,
         },
       },
     };
@@ -75,6 +75,6 @@ describe("collectTtsApiKeyAssignments", () => {
         path: "agents.list.0.tts.providers.elevenlabs.apiKey",
       },
     ]);
-    expect(tts.providers.elevenlabs.apiKey).toEqual(ELEVENLABS_API_KEY_REF);
+    expect(tts.providers.elevenlabs.apiKey).toEqual(TTS_KEY_REF);
   });
 });
