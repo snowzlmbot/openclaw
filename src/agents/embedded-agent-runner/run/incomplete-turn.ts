@@ -725,7 +725,7 @@ export function resolveReasoningOnlyRetryInstruction(params: {
   return REASONING_ONLY_RETRY_INSTRUCTION;
 }
 
-/** Builds a fresh continuation for a clean tool-use terminal turn with settled tool activity. */
+/** Builds a fresh continuation for a clean terminal turn with settled tool activity. */
 export function resolveToolUseTerminalContinuationInstruction(params: {
   provider?: string;
   modelId?: string;
@@ -738,33 +738,60 @@ export function resolveToolUseTerminalContinuationInstruction(params: {
   timedOut: boolean;
   attempt: IncompleteTurnAttempt;
 }): string | null {
-  const assistant = params.attempt.currentAttemptAssistant ?? params.attempt.lastAssistant;
-  // Idle is not proof of completion: a toolUse terminal whose requested tools never
+  const terminalAssistant =
+    params.attempt.currentAttemptAssistant ?? params.attempt.lastAssistant;
+  const snapshot = params.attempt.messagesSnapshot ?? [];
+  const terminalAssistantIndex = terminalAssistant ? snapshot.indexOf(terminalAssistant) : -1;
+  let toolCallAssistantIndex = terminalAssistantIndex;
+  if (terminalAssistant?.stopReason === "stop" && terminalAssistantIndex >= 0) {
+    toolCallAssistantIndex = -1;
+    for (let index = terminalAssistantIndex - 1; index >= 0; index -= 1) {
+      const message = snapshot[index] as { role?: unknown; content?: unknown } | undefined;
+      if (message?.role === "user") {
+        break;
+      }
+      if (
+        message?.role === "assistant" &&
+        Array.isArray(message.content) &&
+        message.content.some(
+          (item) => (item as { type?: unknown } | null)?.type === "toolCall",
+        )
+      ) {
+        toolCallAssistantIndex = index;
+        break;
+      }
+    }
+  }
+  const toolCallAssistant =
+    toolCallAssistantIndex >= 0
+      ? (snapshot[toolCallAssistantIndex] as typeof terminalAssistant)
+      : undefined;
+  // Idle is not proof of completion: a tool terminal whose requested tools never
   // (or only partially) dispatched must keep the incomplete-turn error, or the model
   // could claim skipped side effects succeeded. Lifecycle counts are attempt-cumulative
   // and alias across batches, so completion is proven per tool-call id: every toolCall
-  // in the terminal assistant needs a non-error toolResult in the message snapshot.
-  const requestedToolCallIds = Array.isArray(assistant?.content)
-    ? assistant.content.flatMap((item) => {
+  // in the latest same-turn tool batch needs a non-error toolResult after that assistant.
+  const requestedToolCallIds = Array.isArray(toolCallAssistant?.content)
+    ? toolCallAssistant.content.flatMap((item) => {
         const block = item as { type?: unknown; id?: unknown } | null;
         return block?.type === "toolCall" ? [typeof block.id === "string" ? block.id : null] : [];
       })
     : [];
-  // Scan only results AFTER the terminal assistant: the snapshot spans the whole
+  // Scan only results AFTER the tool-call assistant: the snapshot spans the whole
   // session, and a prior turn's toolResult with a model-reused id would otherwise
-  // prove "completion" for a batch that never dispatched. Assistant not found in
-  // the snapshot fails closed to the existing incomplete-turn error.
-  const snapshot = params.attempt.messagesSnapshot ?? [];
-  const assistantIndex = assistant ? snapshot.indexOf(assistant) : -1;
+  // prove "completion" for a batch that never dispatched. An empty stop may follow
+  // the completed batch; the backward scan above stays within the current user turn.
   const completedToolCallIds = new Set(
-    (assistantIndex >= 0 ? snapshot.slice(assistantIndex + 1) : []).flatMap((message) => {
-      const result = message as { role?: unknown; toolCallId?: unknown; isError?: unknown };
-      return result.role === "toolResult" &&
-        result.isError !== true &&
-        typeof result.toolCallId === "string"
-        ? [result.toolCallId]
-        : [];
-    }),
+    (toolCallAssistantIndex >= 0 ? snapshot.slice(toolCallAssistantIndex + 1) : []).flatMap(
+      (message) => {
+        const result = message as { role?: unknown; toolCallId?: unknown; isError?: unknown };
+        return result.role === "toolResult" &&
+          result.isError !== true &&
+          typeof result.toolCallId === "string"
+          ? [result.toolCallId]
+          : [];
+      },
+    ),
   );
   const allToolsProvenComplete =
     params.attempt.itemLifecycle?.activeCount === 0 &&
@@ -776,7 +803,7 @@ export function resolveToolUseTerminalContinuationInstruction(params: {
     params.aborted ||
     params.promptError != null ||
     params.timedOut ||
-    assistant?.stopReason !== "toolUse" ||
+    (terminalAssistant?.stopReason !== "toolUse" && terminalAssistant?.stopReason !== "stop") ||
     !allToolsProvenComplete ||
     params.attempt.lastToolError ||
     params.attempt.clientToolCalls ||

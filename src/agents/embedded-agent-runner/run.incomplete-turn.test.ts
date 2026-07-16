@@ -1057,6 +1057,166 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     expectWarnMessageWith("tool-use terminal turn lacked a final answer");
   });
 
+  it("continues once when a settled tool batch ends with an empty stop", async () => {
+    const currentUser = {
+      role: "user",
+      content: [{ type: "text", text: "Write the note and confirm when finished." }],
+    };
+    const toolUseAssistant = {
+      role: "assistant",
+      stopReason: "toolUse",
+      provider: "openai",
+      model: "gpt-5.6",
+      content: [{ type: "toolCall", id: "tool_1", name: "write", arguments: { path: "note.txt" } }],
+    };
+    const emptyStopAssistant = {
+      role: "assistant",
+      stopReason: "stop",
+      provider: "openai",
+      model: "gpt-5.6",
+      content: [],
+    } as unknown as NonNullable<EmbeddedRunAttemptResult["currentAttemptAssistant"]>;
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    mockedRunEmbeddedAttempt.mockImplementationOnce(async (attemptParams) => {
+      markUserMessagePersisted(attemptParams);
+      return makeAttemptResult({
+        assistantTexts: [],
+        toolMetas: [{ toolName: "write", meta: "path=note.txt" }],
+        itemLifecycle: { startedCount: 1, completedCount: 1, activeCount: 0 },
+        messagesSnapshot: [
+          currentUser,
+          toolUseAssistant,
+          { role: "toolResult", toolCallId: "tool_1", toolName: "write", isError: false },
+          emptyStopAssistant,
+        ] as unknown as EmbeddedRunAttemptResult["messagesSnapshot"],
+        lastAssistant: undefined,
+        currentAttemptAssistant: emptyStopAssistant,
+      });
+    });
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+      makeAttemptResult({ assistantTexts: ["Write completed. Here is the final answer."] }),
+    );
+    mockedBuildEmbeddedRunPayloads
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([{ text: "Write completed. Here is the final answer." }]);
+
+    const result = await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      provider: "openai",
+      model: "gpt-5.6",
+      runId: "run-empty-stop-after-settled-tools",
+    });
+
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
+    expect(result.payloads?.[0]?.text).toBe("Write completed. Here is the final answer.");
+    const secondCall = runAttemptCall(1);
+    expect(secondCall.prompt).toBe(TOOL_USE_TERMINAL_CONTINUATION_INSTRUCTION);
+    expect(secondCall.suppressNextUserMessagePersistence).toBe(false);
+    expect(secondCall.skipPreparedUserTurnMessage).toBe(true);
+    expectWarnMessageWith("tool-use terminal turn lacked a final answer");
+  });
+
+  it("does not reuse a prior turn's settled tool batch for an empty stop", async () => {
+    const priorToolUseAssistant = {
+      role: "assistant",
+      stopReason: "toolUse",
+      provider: "openai",
+      model: "gpt-5.6",
+      content: [{ type: "toolCall", id: "tool_1", name: "write", arguments: { path: "old.txt" } }],
+    };
+    const currentUser = {
+      role: "user",
+      content: [{ type: "text", text: "Say hello without using tools." }],
+    };
+    const emptyStopAssistant = {
+      role: "assistant",
+      stopReason: "stop",
+      provider: "openai",
+      model: "gpt-5.6",
+      content: [],
+    } as unknown as NonNullable<EmbeddedRunAttemptResult["currentAttemptAssistant"]>;
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    mockedRunEmbeddedAttempt.mockResolvedValue(
+      makeAttemptResult({
+        assistantTexts: [],
+        toolMetas: [{ toolName: "write", meta: "path=old.txt" }],
+        itemLifecycle: { startedCount: 1, completedCount: 1, activeCount: 0 },
+        messagesSnapshot: [
+          priorToolUseAssistant,
+          { role: "toolResult", toolCallId: "tool_1", toolName: "write", isError: false },
+          currentUser,
+          emptyStopAssistant,
+        ] as unknown as EmbeddedRunAttemptResult["messagesSnapshot"],
+        lastAssistant: undefined,
+        currentAttemptAssistant: emptyStopAssistant,
+      }),
+    );
+
+    await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      provider: "openai",
+      model: "gpt-5.6",
+      runId: "run-empty-stop-stale-prior-tool-batch",
+    });
+
+    for (let call = 0; call < mockedRunEmbeddedAttempt.mock.calls.length; call += 1) {
+      expect(runAttemptCall(call).prompt).not.toContain(TOOL_USE_TERMINAL_CONTINUATION_INSTRUCTION);
+    }
+    expectNoWarnMessageWith("tool-use terminal turn lacked a final answer");
+  });
+
+  it("does not continue an empty stop after a partially dispatched tool batch", async () => {
+    const currentUser = {
+      role: "user",
+      content: [{ type: "text", text: "Write both notes and confirm when finished." }],
+    };
+    const toolUseAssistant = {
+      role: "assistant",
+      stopReason: "toolUse",
+      provider: "openai",
+      model: "gpt-5.6",
+      content: [
+        { type: "toolCall", id: "tool_1", name: "write", arguments: { path: "a.txt" } },
+        { type: "toolCall", id: "tool_2", name: "write", arguments: { path: "b.txt" } },
+      ],
+    };
+    const emptyStopAssistant = {
+      role: "assistant",
+      stopReason: "stop",
+      provider: "openai",
+      model: "gpt-5.6",
+      content: [],
+    } as unknown as NonNullable<EmbeddedRunAttemptResult["currentAttemptAssistant"]>;
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    mockedRunEmbeddedAttempt.mockResolvedValue(
+      makeAttemptResult({
+        assistantTexts: [],
+        toolMetas: [{ toolName: "write", meta: "path=a.txt" }],
+        itemLifecycle: { startedCount: 1, completedCount: 1, activeCount: 0 },
+        messagesSnapshot: [
+          currentUser,
+          toolUseAssistant,
+          { role: "toolResult", toolCallId: "tool_1", toolName: "write", isError: false },
+          emptyStopAssistant,
+        ] as unknown as EmbeddedRunAttemptResult["messagesSnapshot"],
+        lastAssistant: undefined,
+        currentAttemptAssistant: emptyStopAssistant,
+      }),
+    );
+
+    await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      provider: "openai",
+      model: "gpt-5.6",
+      runId: "run-empty-stop-partial-tool-batch",
+    });
+
+    for (let call = 0; call < mockedRunEmbeddedAttempt.mock.calls.length; call += 1) {
+      expect(runAttemptCall(call).prompt).not.toContain(TOOL_USE_TERMINAL_CONTINUATION_INSTRUCTION);
+    }
+    expectNoWarnMessageWith("tool-use terminal turn lacked a final answer");
+  });
+
   it("surfaces the existing incomplete-turn error after one tool-use continuation", async () => {
     const toolUseAssistant = {
       role: "assistant",
