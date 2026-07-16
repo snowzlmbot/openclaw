@@ -676,17 +676,15 @@ describe("gateway startup config secret preflight", () => {
         },
       },
     });
-    const resolvedConfig = structuredClone(sourceConfig);
-    delete resolvedConfig.messages!.tts!.providers!.elevenlabs!.apiKey;
     const warning: SecretResolverWarning = {
       code: "SECRETS_REF_UNAVAILABLE_OPTIONAL",
       path: "messages.tts.providers.elevenlabs.apiKey",
       message:
-        'messages.tts.providers.elevenlabs.apiKey: optional SecretRef "env:default:ELEVENLABS_API_KEY" is unavailable; leaving this capability unconfigured until the SecretRef resolves. Environment variable "ELEVENLABS_API_KEY" is missing or empty.',
+        'messages.tts.providers.elevenlabs.apiKey: optional SecretRef "env:default:ELEVENLABS_API_KEY" is unavailable; leaving this capability configured-unavailable until the SecretRef resolves. Environment variable "ELEVENLABS_API_KEY" is missing or empty.',
     };
     const prepareRuntimeSecretsSnapshot = vi.fn(async () => ({
       ...preparedSnapshot(sourceConfig),
-      config: resolvedConfig,
+      config: structuredClone(sourceConfig),
       warnings: [warning],
     }));
     const emitStateEvent = vi.fn();
@@ -702,7 +700,9 @@ describe("gateway startup config secret preflight", () => {
       activate: true,
     });
 
-    expect(result.config.messages?.tts?.providers?.elevenlabs?.apiKey).toBeUndefined();
+    expect(result.config.messages?.tts?.providers?.elevenlabs?.apiKey).toEqual(
+      sourceConfig.messages?.tts?.providers?.elevenlabs?.apiKey,
+    );
     expect(prepareRuntimeSecretsSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({ allowUnavailableOptionalSecrets: true }),
     );

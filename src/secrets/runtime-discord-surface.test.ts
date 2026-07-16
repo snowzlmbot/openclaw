@@ -542,7 +542,11 @@ describe("secrets runtime snapshot discord surface", () => {
     expect(
       snapshot.config.channels?.discord?.accounts?.enabledOverride?.voice?.tts?.providers?.openai
         ?.apiKey,
-    ).toBeUndefined();
+    ).toEqual({
+      source: "env",
+      provider: "default",
+      id: "DISCORD_ENABLED_OVERRIDE_TTS_MISSING",
+    });
     expect(snapshot.warnings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

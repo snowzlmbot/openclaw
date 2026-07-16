@@ -70,7 +70,7 @@ describe("secrets runtime snapshot", () => {
       loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
     });
 
-    expect(redactSensitiveText(`resolved ${secret}`, { mode: "off" })).toBe("resolved test-s…cret");
+    expect(redactSensitiveText(`resolved ${secret}`, { mode: "off" })).toBe("resolved ***");
   });
 
   it("resolves sandbox ssh secret refs for active ssh backends", async () => {
@@ -257,7 +257,7 @@ describe("secrets runtime snapshot", () => {
       loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
     });
 
-    expect(snapshot.config.messages?.tts?.providers?.elevenlabs?.apiKey).toBeUndefined();
+    expect(snapshot.config.messages?.tts?.providers?.elevenlabs?.apiKey).toEqual(TTS_REF);
     expectWarning(snapshot, {
       code: "SECRETS_REF_UNAVAILABLE_OPTIONAL",
       path: "messages.tts.providers.elevenlabs.apiKey",
@@ -307,7 +307,11 @@ describe("secrets runtime snapshot", () => {
       loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
     });
 
-    expect(snapshot.config.messages?.tts?.providers?.elevenlabs?.apiKey).toBeUndefined();
+    expect(snapshot.config.messages?.tts?.providers?.elevenlabs?.apiKey).toEqual({
+      source: "file",
+      provider: "ttsfile",
+      id: "/providers/elevenlabs/apiKey",
+    });
     expectWarning(snapshot, {
       code: "SECRETS_REF_UNAVAILABLE_OPTIONAL",
       path: "messages.tts.providers.elevenlabs.apiKey",

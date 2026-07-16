@@ -39,7 +39,7 @@ function warnOptionalSecretUnavailable(params: {
   const refLabel = secretRefKey(params.assignment.ref);
   const message = [
     `${params.assignment.path}: optional SecretRef "${refLabel}" is unavailable; ` +
-      "leaving this capability unconfigured until the SecretRef resolves.",
+      "leaving this capability configured-unavailable until the SecretRef resolves.",
     params.assignment.optionalReason,
     formatErrorMessage(params.error),
   ]
@@ -98,7 +98,8 @@ export async function resolveAndApplySecretAssignments(params: {
       if (!isOptionalSecretUnavailableError({ assignment, error })) {
         throw error;
       }
-      assignment.apply(assignment.unavailableValue);
+      // Preserve the unresolved SecretRef in the runtime config. Removing it would
+      // reactivate provider env/profile fallbacks and could route data to another account.
       warnOptionalSecretUnavailable({ assignment, context: params.context, error });
       continue;
     }

@@ -209,10 +209,10 @@ describe("ttsHandlers", () => {
     });
   });
 
-  it("tts.speak keeps degraded provider-not-configured failures localized to TTS", async () => {
+  it("tts.speak keeps degraded credential failures localized to TTS", async () => {
     mocks.synthesizeSpeech.mockResolvedValue({
       success: false,
-      error: "TTS conversion failed: elevenlabs: not configured",
+      error: "TTS conversion failed: elevenlabs: unresolved SecretRef",
     });
 
     const { ttsHandlers } = await import("./tts.js");
@@ -229,7 +229,7 @@ describe("ttsHandlers", () => {
 
     expectGatewayErrorResponse(respond, {
       code: ErrorCodes.UNAVAILABLE,
-      message: "TTS conversion failed: elevenlabs: not configured",
+      message: "TTS conversion failed: elevenlabs: unresolved SecretRef",
     });
   });
 });

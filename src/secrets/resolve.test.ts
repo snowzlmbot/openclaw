@@ -308,7 +308,7 @@ describe("secret ref resolver", () => {
   });
 
   itPosix(
-    "classifies omitted exec ids as missing but keeps provider errors fail-closed",
+    "classifies omitted and NOT_FOUND exec ids as missing but keeps other errors fail-closed",
     async () => {
       const ref = { source: "exec", provider: "execmain", id: "openai/api-key" } as const;
       const configFor = (command: string): OpenClawConfig => ({
@@ -318,13 +318,17 @@ describe("secret ref resolver", () => {
           },
         },
       });
-      const missingError = await resolveSecretRefValue(ref, {
+      const omittedError = await resolveSecretRefValue(ref, {
         config: configFor(execMissingIdScriptPath),
       }).catch((error: unknown) => error);
-      const providerError = await resolveSecretRefValue(ref, {
+      const missingError = await resolveSecretRefValue(ref, {
         config: configFor(execProviderErrorScriptPath),
       }).catch((error: unknown) => error);
+      const providerError = await resolveSecretRefValue(ref, {
+        config: configFor(execUnsafeProviderErrorScriptPath),
+      }).catch((error: unknown) => error);
 
+      expect(isMissingSecretRefResolutionError({ ref, error: omittedError })).toBe(true);
       expect(isMissingSecretRefResolutionError({ ref, error: missingError })).toBe(true);
       expect(isMissingSecretRefResolutionError({ ref, error: providerError })).toBe(false);
     },

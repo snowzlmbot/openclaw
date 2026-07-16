@@ -32,7 +32,6 @@ type SecretAssignment = {
   expected: "string" | "string-or-object";
   optional?: boolean;
   optionalReason?: string;
-  unavailableValue?: unknown;
   apply: (value: unknown) => void;
 };
 
@@ -117,7 +116,6 @@ export function collectSecretInputAssignment(params: {
   inactiveReason?: string;
   optional?: boolean;
   optionalReason?: string;
-  unavailableValue?: unknown;
   apply: (value: unknown) => void;
 }): void {
   const ref = coerceSecretRef(params.value, params.defaults);
@@ -138,9 +136,6 @@ export function collectSecretInputAssignment(params: {
     expected: params.expected,
     ...(params.optional ? { optional: true } : {}),
     ...(params.optionalReason ? { optionalReason: params.optionalReason } : {}),
-    ...(Object.hasOwn(params, "unavailableValue")
-      ? { unavailableValue: params.unavailableValue }
-      : {}),
     apply: params.apply,
   });
 }

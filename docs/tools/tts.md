@@ -813,9 +813,10 @@ Reply -> TTS enabled?
 Provider `apiKey` fields can be raw strings or SecretRefs. During cold Gateway
 startup, before any runtime secrets snapshot is active, these keys are optional
 when the secret value is absent: startup continues, the affected provider is
-treated as unconfigured/degraded, and only speech synthesis requests for that
-provider fail with the normal provider-not-configured path, such as
-`TTS conversion failed: elevenlabs: not configured`. Reloads and config-write
+kept configured-unavailable, and only speech synthesis requests for that
+provider fail through the normal localized credential-error path. The unresolved
+SecretRef stays in the runtime snapshot so provider environment or profile
+fallbacks cannot silently select a different account. Reloads and config-write
 preflight remain fail-closed so an unavailable TTS ref cannot replace the
 last-known-good snapshot or authorize an unresolved config write. Invalid
 SecretRefs, provider policy/security failures, and non-string resolved values

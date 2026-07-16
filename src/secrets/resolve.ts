@@ -472,7 +472,7 @@ function parseExecValues(params: {
       const code = isRecord(entry) && typeof entry.code === "string" ? entry.code : null;
       const safeCode = code && SAFE_EXEC_ERROR_CODES.has(code) ? code : null;
       throw refResolutionError({
-        code: "SECRET_REF_PROVIDER_ERROR",
+        code: safeCode === "NOT_FOUND" ? "SECRET_REF_NOT_FOUND" : "SECRET_REF_PROVIDER_ERROR",
         source: "exec",
         provider: params.providerName,
         refId: id,

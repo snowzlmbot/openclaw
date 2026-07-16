@@ -40,7 +40,6 @@ describe("collectTtsApiKeyAssignments", () => {
       path: "messages.tts.providers.elevenlabs.apiKey",
       expected: "string",
       optional: true,
-      unavailableValue: undefined,
     });
     expect(context.assignments[0]?.optionalReason).toContain("only speech synthesis");
 
