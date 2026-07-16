@@ -115,7 +115,13 @@ async function expectDiscordStartupDelay(
   expect(sleepWithAbortMock).toHaveBeenCalledWith(expectedMs, ctx.abortSignal);
 }
 
-function installDiscordRuntime(discord: Record<string, unknown>) {
+function installDiscordRuntime(
+  discord: Record<string, unknown>,
+  openKeyedStore: (options: Record<string, unknown>) => unknown = vi.fn(() => ({
+    lookup: vi.fn(async () => undefined),
+    register: vi.fn(async () => undefined),
+  })),
+) {
   setDiscordRuntime({
     channel: {
       discord,
@@ -123,6 +129,7 @@ function installDiscordRuntime(discord: Record<string, unknown>) {
     logging: {
       shouldLogVerbose: () => false,
     },
+    state: { openKeyedStore },
   } as unknown as PluginRuntime);
 }
 
@@ -200,6 +207,33 @@ beforeAll(async () => {
 });
 
 describe("discordPlugin outbound", () => {
+  it("builds tool context with separate native and routable DM targets", () => {
+    const buildToolContext = discordPlugin.threading?.buildToolContext;
+    if (!buildToolContext) {
+      throw new Error("Expected discordPlugin.threading.buildToolContext to be defined");
+    }
+    const hasRepliedRef = { value: false };
+
+    expect(
+      buildToolContext({
+        cfg: {} as OpenClawConfig,
+        context: {
+          To: "user:123456789",
+          NativeChannelId: "987654321",
+          ChatType: "direct",
+          CurrentMessageId: "message-1",
+        },
+        hasRepliedRef,
+      }),
+    ).toEqual({
+      currentChannelId: "987654321",
+      currentChatType: "direct",
+      currentMessagingTarget: "user:123456789",
+      currentMessageId: "message-1",
+      hasRepliedRef,
+    });
+  });
+
   it("avoids local require calls for bundled-only sibling modules", async () => {
     const source = await readFile(
       resolve(process.cwd(), "extensions/discord/src/channel.ts"),
@@ -281,6 +315,63 @@ describe("discordPlugin outbound", () => {
       to: "user:999",
       kind: "user",
       display: "jane",
+      source: "directory",
+    });
+  });
+
+  it("preserves the normalized channel kind for bare current-channel ids", async () => {
+    const resolveTarget = discordPlugin.messaging?.targetResolver?.resolveTarget;
+    if (!resolveTarget) {
+      throw new Error(
+        "Expected discordPlugin.messaging.targetResolver.resolveTarget to be defined",
+      );
+    }
+
+    await expect(
+      resolveTarget({
+        cfg: createCfg(),
+        accountId: "default",
+        input: "1470130713209602050",
+        normalized: "channel:1470130713209602050",
+      }),
+    ).resolves.toEqual({
+      to: "channel:1470130713209602050",
+      kind: "channel",
+      display: "1470130713209602050",
+      source: "normalized",
+    });
+  });
+
+  it("keeps allowlisted bare Discord ids routable as DMs", async () => {
+    const resolveTarget = discordPlugin.messaging?.targetResolver?.resolveTarget;
+    if (!resolveTarget) {
+      throw new Error(
+        "Expected discordPlugin.messaging.targetResolver.resolveTarget to be defined",
+      );
+    }
+
+    await expect(
+      resolveTarget({
+        cfg: {
+          channels: {
+            discord: {
+              accounts: {
+                default: {
+                  token: "discord-token",
+                  allowFrom: ["123456789"],
+                },
+              },
+            },
+          },
+        },
+        accountId: "default",
+        input: "123456789",
+        normalized: "channel:123456789",
+      }),
+    ).resolves.toEqual({
+      to: "user:123456789",
+      kind: "user",
+      display: "123456789",
       source: "directory",
     });
   });
@@ -671,6 +762,38 @@ describe("discordPlugin outbound", () => {
         },
       ]),
     );
+  });
+
+  it("opens the SQLite command deployment cache and passes it to the provider", async () => {
+    prepareDiscordStartupMocks();
+    const commandDeployHashStore = {
+      lookup: vi.fn(async () => undefined),
+      register: vi.fn(async () => undefined),
+    };
+    const openKeyedStore = vi.fn(() => commandDeployHashStore);
+    installDiscordRuntime({}, openKeyedStore);
+
+    await startDiscordAccount(createCfg());
+
+    expect(openKeyedStore).toHaveBeenCalledWith({
+      namespace: "command-deploy-hashes",
+      maxEntries: 10_000,
+      overflowPolicy: "evict-oldest",
+    });
+    expect(objectArgAt(monitorDiscordProviderMock, 0, 0).commandDeployHashStore).toBe(
+      commandDeployHashStore,
+    );
+  });
+
+  it("continues Discord startup when the command deployment cache cannot open", async () => {
+    prepareDiscordStartupMocks();
+    installDiscordRuntime({}, () => {
+      throw new Error("SQLite unavailable");
+    });
+
+    await startDiscordAccount(createCfg());
+
+    expect(objectArgAt(monitorDiscordProviderMock, 0, 0).commandDeployHashStore).toBeUndefined();
   });
 
   it("clears stale Discord probe metadata when the async startup probe degrades", async () => {

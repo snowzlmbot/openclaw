@@ -154,7 +154,7 @@ type ReadOnlyChannelPluginResolution = {
   loadFailures: ReadOnlyChannelPluginLoadFailure[];
 };
 type ManifestChannelConfigRecord = NonNullable<PluginManifestRecord["channelConfigs"]>[string];
-export type ReadOnlyChannelPluginLoadFailure = {
+type ReadOnlyChannelPluginLoadFailure = {
   channelId: string;
   pluginId: string;
   message: string;
@@ -1040,3 +1040,4 @@ export function resolveReadOnlyChannelPluginsForConfig(
   }
   return cloneReadOnlyChannelPluginResolution(resolution);
 }
+/* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */
