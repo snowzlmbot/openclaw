@@ -7,10 +7,10 @@ import {
   applyResolvedAssignments,
   pushWarning,
   type ResolverContext,
-  type SecretAssignment,
 } from "./runtime-shared.js";
 
 type SecretResolutionOptions = Parameters<typeof resolveSecretRefValues>[1];
+type SecretAssignment = ResolverContext["assignments"][number];
 
 function splitSecretAssignments(
   assignments: SecretAssignment[],

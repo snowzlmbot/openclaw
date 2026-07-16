@@ -243,6 +243,21 @@ describe("secret ref resolver", () => {
     expect(isMissingSecretRefResolutionError({ ref, error: policyError })).toBe(false);
   });
 
+  it("classifies missing refs under a configured default provider alias", async () => {
+    const ref = { source: "env", provider: "primary", id: "MISSING_API_KEY" } as const;
+    const error = await resolveSecretRefValue(ref, {
+      config: {
+        secrets: {
+          defaults: { env: "primary" },
+          providers: { primary: { source: "env" } },
+        },
+      },
+      env: {},
+    }).catch((caught: unknown) => caught);
+
+    expect(isMissingSecretRefResolutionError({ ref, error })).toBe(true);
+  });
+
   itPosix("resolves file refs in json mode", async () => {
     const root = await createCaseDir("file");
     const filePath = path.join(root, "secrets.json");
