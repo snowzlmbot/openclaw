@@ -3,11 +3,7 @@ import { formatErrorMessage } from "../infra/errors.js";
 import { registerSecretValueForRedaction } from "../logging/secret-redaction-registry.js";
 import { secretRefKey } from "./ref-contract.js";
 import { isMissingSecretRefResolutionError, resolveSecretRefValues } from "./resolve.js";
-import {
-  applyResolvedAssignments,
-  pushWarning,
-  type ResolverContext,
-} from "./runtime-shared.js";
+import { applyResolvedAssignments, pushWarning, type ResolverContext } from "./runtime-shared.js";
 
 type SecretResolutionOptions = Parameters<typeof resolveSecretRefValues>[1];
 type SecretAssignment = ResolverContext["assignments"][number];
