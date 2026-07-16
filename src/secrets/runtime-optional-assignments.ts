@@ -3,6 +3,7 @@ import { formatErrorMessage } from "../infra/errors.js";
 import { registerSecretValueForRedaction } from "../logging/secret-redaction-registry.js";
 import { secretRefKey } from "./ref-contract.js";
 import { isMissingSecretRefResolutionError, resolveSecretRefValues } from "./resolve.js";
+import { getOptionalSecretAssignmentReason } from "./runtime-optional-assignment-metadata.js";
 import { applyResolvedAssignments, pushWarning, type ResolverContext } from "./runtime-shared.js";
 
 type SecretResolutionOptions = Parameters<typeof resolveSecretRefValues>[1];
@@ -18,7 +19,10 @@ function splitSecretAssignments(
   const required: SecretAssignment[] = [];
   const optional: SecretAssignment[] = [];
   for (const assignment of assignments) {
-    if (allowUnavailableOptionalAssignments && assignment.optional) {
+    if (
+      allowUnavailableOptionalAssignments &&
+      getOptionalSecretAssignmentReason(assignment) !== undefined
+    ) {
       optional.push(assignment);
       continue;
     }
@@ -36,7 +40,7 @@ function warnOptionalSecretUnavailable(params: {
   const message = [
     `${params.assignment.path}: optional SecretRef "${refLabel}" is unavailable; ` +
       "leaving this capability configured-unavailable until the SecretRef resolves.",
-    params.assignment.optionalReason,
+    getOptionalSecretAssignmentReason(params.assignment),
     formatErrorMessage(params.error),
   ]
     .filter((part): part is string => Boolean(part))

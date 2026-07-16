@@ -1,3 +1,4 @@
+import { markSecretAssignmentOptional } from "./runtime-optional-assignment-metadata.js";
 /** Collects text-to-speech secret refs from runtime config. */
 import {
   collectSecretInputAssignment,
@@ -15,6 +16,7 @@ function collectProviderApiKeyAssignment(params: {
   active?: boolean;
   inactiveReason?: string;
 }): void {
+  const assignmentCount = params.context.assignments.length;
   collectSecretInputAssignment({
     value: params.providerConfig.apiKey,
     path: `${params.pathPrefix}.providers.${params.providerId}.apiKey`,
@@ -23,13 +25,17 @@ function collectProviderApiKeyAssignment(params: {
     context: params.context,
     active: params.active,
     inactiveReason: params.inactiveReason,
-    optional: true,
-    optionalReason:
-      "TTS provider API keys are optional at Gateway startup; only speech synthesis for this provider should fail while the key is unavailable.",
     apply: (value) => {
       params.providerConfig.apiKey = value;
     },
   });
+  const assignment = params.context.assignments[assignmentCount];
+  if (assignment) {
+    markSecretAssignmentOptional(
+      assignment,
+      "TTS provider API keys are optional at Gateway startup; only speech synthesis for this provider should fail while the key is unavailable.",
+    );
+  }
 }
 
 /** Collects provider API key SecretRefs from a TTS config block. */

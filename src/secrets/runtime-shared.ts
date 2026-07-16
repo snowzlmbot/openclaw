@@ -30,8 +30,6 @@ type SecretAssignment = {
   ref: SecretRef;
   path: string;
   expected: "string" | "string-or-object";
-  optional?: boolean;
-  optionalReason?: string;
   apply: (value: unknown) => void;
 };
 
@@ -114,8 +112,6 @@ export function collectSecretInputAssignment(params: {
   context: ResolverContext;
   active?: boolean;
   inactiveReason?: string;
-  optional?: boolean;
-  optionalReason?: string;
   apply: (value: unknown) => void;
 }): void {
   const ref = coerceSecretRef(params.value, params.defaults);
@@ -134,8 +130,6 @@ export function collectSecretInputAssignment(params: {
     ref,
     path: params.path,
     expected: params.expected,
-    ...(params.optional ? { optional: true } : {}),
-    ...(params.optionalReason ? { optionalReason: params.optionalReason } : {}),
     apply: params.apply,
   });
 }

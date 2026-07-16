@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { collectTtsApiKeyAssignments } from "./runtime-config-collectors-tts.js";
+import { getOptionalSecretAssignmentReason } from "./runtime-optional-assignment-metadata.js";
 import { createResolverContext } from "./runtime-shared.js";
 
 const TTS_KEY_REF = {
@@ -39,9 +40,10 @@ describe("collectTtsApiKeyAssignments", () => {
     expect(context.assignments[0]).toMatchObject({
       path: "messages.tts.providers.elevenlabs.apiKey",
       expected: "string",
-      optional: true,
     });
-    expect(context.assignments[0]?.optionalReason).toContain("only speech synthesis");
+    expect(getOptionalSecretAssignmentReason(context.assignments[0] as object)).toContain(
+      "only speech synthesis",
+    );
 
     const resolved = "redacted";
     context.assignments[0]?.apply(resolved);
