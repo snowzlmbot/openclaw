@@ -1,0 +1,144 @@
+name: Issue 108738 proof
+
+run-name: Issue 108738 release regression and fixed-main proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  RELEASE_SHA: 2d2ddc43d0dcf71f31283d780f9fe9ff4cc04fe4
+  FIX_SHA: 2848acbbaa18f120d257557b1cfb6939f383dcc6
+  TEST_FILE: src/agents/embedded-agent-runner/run.incomplete-turn.test.ts
+  TEST_NAME: "issue 108738: continues after settled tools instead of ending without final text"
+
+jobs:
+  release-reproduction:
+    name: v2026.7.1 reproduces missing continuation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout OpenClaw v2026.7.1 commit
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: openclaw/openclaw
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout proof scripts
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: snowzlmbot/OpenClaw
+          ref: proof/issue-108738
+          path: proof
+          persist-credentials: false
+
+      - name: Setup Node and dependencies
+        uses: ./.github/actions/setup-node-env
+        with:
+          node-version: "24.x"
+          install-bun: "false"
+
+      - name: Inject the fixed-main regression into the release tree
+        run: node proof/evidence/issue-108738/inject-tool-terminal-test.mjs .
+
+      - name: Prove the release fails the regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-output
+          set +e
+          node scripts/run-vitest.mjs "$TEST_FILE" -t "$TEST_NAME" 2>&1 | tee evidence-output/release-2026.7.1.log
+          test_status=${PIPESTATUS[0]}
+          set -e
+          if [[ "$test_status" -eq 0 ]]; then
+            echo "Expected v2026.7.1 to fail the continuation regression, but it passed." >&2
+            exit 1
+          fi
+          grep -F "$TEST_NAME" evidence-output/release-2026.7.1.log
+          grep -E "expected .*2|toHaveBeenCalledTimes\(2\)|AssertionError" evidence-output/release-2026.7.1.log
+          printf '### v2026.7.1 reproduction\n- SHA: `%s`\n- Result: expected regression failure observed\n- Scenario: settled tool result followed by terminal `toolUse` and no final assistant text\n' "$RELEASE_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release reproduction log
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: issue-108738-release-reproduction
+          path: evidence-output/release-2026.7.1.log
+          if-no-files-found: error
+
+  fixed-proof:
+    name: merged fix passes the same regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout canonical fix commit
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: openclaw/openclaw
+          ref: ${{ env.FIX_SHA }}
+          persist-credentials: false
+
+      - name: Setup Node and dependencies
+        uses: ./.github/actions/setup-node-env
+        with:
+          node-version: "24.x"
+          install-bun: "false"
+
+      - name: Run the canonical fixed regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-output
+          node scripts/run-vitest.mjs "$TEST_FILE" \
+            -t "continues once after settled side-effecting tools finish without a final answer" \
+            2>&1 | tee evidence-output/fix-2848acb.log
+          printf '### Canonical fix proof\n- SHA: `%s`\n- Result: regression passed\n- Canonical PR: https://github.com/openclaw/openclaw/pull/108966\n' "$FIX_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload fixed regression log
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: issue-108738-canonical-fix
+          path: evidence-output/fix-2848acb.log
+          if-no-files-found: error
+
+  weixin-contract:
+    name: Weixin ingress is a direct conversation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout proof scripts
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: snowzlmbot/OpenClaw
+          ref: proof/issue-108738
+          persist-credentials: false
+
+      - name: Checkout Tencent Weixin plugin
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: Tencent/openclaw-weixin
+          ref: cef0bfc390393f716903e16d50408118047f87e0
+          path: weixin
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24.x"
+
+      - name: Verify direct-chat ingress contract
+        run: |
+          node evidence/issue-108738/verify-weixin-context.mjs \
+            weixin evidence-output/weixin-context.json
+          cat evidence-output/weixin-context.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Weixin contract report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: issue-108738-weixin-direct-contract
+          path: evidence-output/weixin-context.json
+          if-no-files-found: error
