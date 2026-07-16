@@ -258,6 +258,23 @@ describe("secret ref resolver", () => {
     expect(isMissingSecretRefResolutionError({ ref, error })).toBe(true);
   });
 
+  it("does not rewrite an explicit default provider to a configured alias", async () => {
+    const ref = { source: "env", provider: "default", id: "MISSING_API_KEY" } as const;
+    const error = await resolveSecretRefValue(ref, {
+      config: {
+        secrets: {
+          defaults: { env: "primary" },
+          providers: { primary: { source: "env" } },
+        },
+      },
+      env: {},
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('Secret provider "default" is not configured');
+    expect(isMissingSecretRefResolutionError({ ref, error })).toBe(false);
+  });
+
   itPosix("resolves file refs in json mode", async () => {
     const root = await createCaseDir("file");
     const filePath = path.join(root, "secrets.json");

@@ -93,6 +93,8 @@ export function isMissingSecretRefResolutionError(params: {
   error: unknown;
 }): boolean {
   const refId = params.ref.id.trim();
+  // Canonical refs already own their provider identity. Config defaults only fill an omitted
+  // provider during coercion; resolution never rewrites an explicit provider such as "default".
   return (
     params.error instanceof SecretRefResolutionError &&
     params.error.code === "SECRET_REF_NOT_FOUND" &&
