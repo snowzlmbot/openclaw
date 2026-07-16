@@ -12,7 +12,7 @@ const BUNDLED_CODEX_PLUGIN_ORIGINS = new Map([["codex", "bundled" as const]]);
 const { prepareSecretsRuntimeSnapshot } = setupSecretsRuntimeSnapshotTestHooks();
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
-const APP_REF = {
+const CODEX_APP_SERVER_TOKEN_REF = {
   source: "env",
   provider: "default",
   id: "CODEX_APP_SERVER_TOKEN",
@@ -41,38 +41,36 @@ function expectWarning(
 }
 
 describe("secrets runtime snapshot", () => {
-  it("registers required and optional resolved values for exact redaction", async () => {
-    const reqSecret = "test-req-secret";
-    const optSecret = "test-opt-secret";
+  it("registers every resolved value for exact redaction", async () => {
+    const secret = "runtime-registration-secret";
     await prepareSecretsRuntimeSnapshot({
       config: asConfig({
         talk: {
           apiKey: { source: "env", provider: "default", id: "TALK_API_KEY" },
         },
-        messages: {
-          tts: {
-            providers: {
-              elevenlabs: {
-                apiKey: TTS_REF,
-              },
-            },
-          },
-        },
       }),
-      env: {
-        TALK_API_KEY: reqSecret,
-        ELEVENLABS_API_KEY: optSecret,
-      },
+      env: { TALK_API_KEY: secret },
       includeAuthStoreRefs: false,
       loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
     });
 
-    expect(redactSensitiveText(`resolved ${reqSecret}`, { mode: "off" })).toBe(
-      "resolved test-r…cret",
-    );
-    expect(redactSensitiveText(`resolved ${optSecret}`, { mode: "off" })).toBe(
-      "resolved test-o…cret",
-    );
+    expect(redactSensitiveText(`resolved ${secret}`, { mode: "off" })).toBe("resolved runtim…cret");
+  });
+
+  it("registers resolved optional TTS values for exact redaction", async () => {
+    const secret = "test-secret";
+    await prepareSecretsRuntimeSnapshot({
+      config: asConfig({
+        messages: {
+          tts: { providers: { elevenlabs: { apiKey: TTS_REF } } },
+        },
+      }),
+      env: { ELEVENLABS_API_KEY: secret },
+      includeAuthStoreRefs: false,
+      loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
+    });
+
+    expect(redactSensitiveText(`resolved ${secret}`, { mode: "off" })).toBe("resolved test-s…cret");
   });
 
   it("resolves sandbox ssh secret refs for active ssh backends", async () => {
@@ -148,8 +146,6 @@ describe("secrets runtime snapshot", () => {
   });
 
   it("resolves active bundled Codex app-server plugin SecretRefs", async () => {
-    const authToken = "redacted";
-    const sessToken = "redacted";
     const snapshot = await prepareSecretsRuntimeSnapshot({
       config: asConfig({
         plugins: {
@@ -160,7 +156,7 @@ describe("secrets runtime snapshot", () => {
                 appServer: {
                   transport: "websocket",
                   url: "wss://codex-app-server.example.internal/ws",
-                  authToken: APP_REF,
+                  authToken: CODEX_APP_SERVER_TOKEN_REF,
                   headers: {
                     Authorization: "Bearer literal-token",
                     "x-codex-client-session-token": "${CODEX_CLIENT_SESSION_TOKEN}",
@@ -172,8 +168,8 @@ describe("secrets runtime snapshot", () => {
         },
       }),
       env: {
-        CODEX_APP_SERVER_TOKEN: authToken,
-        CODEX_CLIENT_SESSION_TOKEN: sessToken,
+        CODEX_APP_SERVER_TOKEN: "resolved-app-server-token",
+        CODEX_CLIENT_SESSION_TOKEN: "resolved-session-token",
       },
       includeAuthStoreRefs: false,
       loadablePluginOrigins: BUNDLED_CODEX_PLUGIN_ORIGINS,
@@ -181,10 +177,10 @@ describe("secrets runtime snapshot", () => {
 
     expect(snapshot.config.plugins?.entries?.codex?.config).toMatchObject({
       appServer: {
-        authToken,
+        authToken: "resolved-app-server-token",
         headers: {
           Authorization: "Bearer literal-token",
-          "x-codex-client-session-token": sessToken,
+          "x-codex-client-session-token": "resolved-session-token",
         },
       },
     });
@@ -202,7 +198,7 @@ describe("secrets runtime snapshot", () => {
                   appServer: {
                     transport: "websocket",
                     url: "wss://codex-app-server.example.internal/ws",
-                    authToken: APP_REF,
+                    authToken: CODEX_APP_SERVER_TOKEN_REF,
                     headers: {
                       "x-codex-client-session-token": "${CODEX_CLIENT_SESSION_TOKEN}",
                     },
@@ -213,7 +209,7 @@ describe("secrets runtime snapshot", () => {
           },
         }),
         env: {
-          CODEX_CLIENT_SESSION_TOKEN: "test-codex-client-session-token",
+          CODEX_CLIENT_SESSION_TOKEN: "resolved-session-token",
         },
         includeAuthStoreRefs: false,
         loadablePluginOrigins: BUNDLED_CODEX_PLUGIN_ORIGINS,
