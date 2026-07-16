@@ -44,8 +44,8 @@ describe("collectTtsApiKeyAssignments", () => {
     });
     expect(context.assignments[0]?.optionalReason).toContain("only speech synthesis");
 
-    context.assignments[0]?.apply("test-api-key");
-    expect(tts.providers.elevenlabs.apiKey).toBe("test-api-key");
+    context.assignments[0]?.apply("redacted");
+    expect(tts.providers.elevenlabs.apiKey).toBe("redacted");
   });
 
   it("keeps inactive TTS provider SecretRefs out of resolution", () => {
