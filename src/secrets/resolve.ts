@@ -511,6 +511,7 @@ async function resolveExecRefs(params: {
   const ids = uniqueStrings(params.refs.map((ref) => ref.id));
   if (ids.length > params.limits.maxRefsPerProvider) {
     throw providerResolutionError({
+      code: "SECRET_PROVIDER_INVALID",
       source: "exec",
       provider: params.providerName,
       message: `Exec provider "${params.providerName}" exceeded maxRefsPerProvider (${params.limits.maxRefsPerProvider}).`,
@@ -544,6 +545,7 @@ async function resolveExecRefs(params: {
   const input = JSON.stringify(requestPayload);
   if (Buffer.byteLength(input, "utf8") > params.limits.maxBatchBytes) {
     throw providerResolutionError({
+      code: "SECRET_PROVIDER_INVALID",
       source: "exec",
       provider: params.providerName,
       message: `Exec provider "${params.providerName}" request exceeded maxBatchBytes (${params.limits.maxBatchBytes}).`,
@@ -763,6 +765,7 @@ function createProviderResolutionTasks(params: {
     (group) => async (): Promise<{ group: ProviderRefGroup; values: ProviderResolutionOutput }> => {
       if (group.refs.length > params.limits.maxRefsPerProvider) {
         throw providerResolutionError({
+          code: "SECRET_PROVIDER_INVALID",
           source: group.source,
           provider: group.providerName,
           message: `Secret provider "${group.providerName}" exceeded maxRefsPerProvider (${params.limits.maxRefsPerProvider}).`,
