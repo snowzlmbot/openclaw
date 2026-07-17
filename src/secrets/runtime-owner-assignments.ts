@@ -1,4 +1,5 @@
 /** Resolves SecretRef assignments atomically by owning runtime surface. */
+import { toErrorObject } from "../infra/errors.js";
 import { registerSecretValueForRedaction } from "../logging/secret-redaction-registry.js";
 import { secretRefKey } from "./ref-contract.js";
 import {
@@ -170,7 +171,7 @@ export async function resolveAndApplySecretAssignments(params: {
       nextPendingOwners.push(assignments);
     }
     if (nextPendingOwners.length === pendingOwners.length) {
-      throw resolution.failures[0]?.error ?? new Error("Secret resolution made no progress.");
+      throw toErrorObject(resolution.failures[0]?.error, "Secret resolution made no progress.");
     }
     pendingOwners = nextPendingOwners;
   }
