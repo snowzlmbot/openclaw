@@ -1,20 +1,26 @@
 /** Typed errors for SecretRef provider and ref-level resolution failures. */
 import type { SecretRef, SecretRefSource } from "../config/types.secrets.js";
 
-type SecretRefResolutionCode =
+export type SecretRefResolutionCode =
   | "SECRET_REF_NOT_FOUND"
   | "SECRET_REF_POLICY_DENIED"
   | "SECRET_REF_INVALID"
   | "SECRET_REF_PROVIDER_ERROR"
   | "SECRET_REF_PROVIDER_CONTRACT";
 
+export type SecretProviderResolutionCode =
+  | "SECRET_PROVIDER_INVALID"
+  | "SECRET_PROVIDER_UNAVAILABLE";
+
 /** Error for failures that affect an entire configured secret provider. */
 class SecretProviderResolutionError extends Error {
   readonly scope = "provider" as const;
+  readonly code: SecretProviderResolutionCode;
   readonly source: SecretRefSource;
   readonly provider: string;
 
   constructor(params: {
+    code: SecretProviderResolutionCode;
     source: SecretRefSource;
     provider: string;
     message: string;
@@ -22,6 +28,7 @@ class SecretProviderResolutionError extends Error {
   }) {
     super(params.message, params.cause !== undefined ? { cause: params.cause } : undefined);
     this.name = "SecretProviderResolutionError";
+    this.code = params.code;
     this.source = params.source;
     this.provider = params.provider;
   }
@@ -67,13 +74,39 @@ export function isSecretResolutionError(
   );
 }
 
+/** Redacted reason suitable for warnings and status output. */
+export function describeSecretResolutionError(value: unknown): string | undefined {
+  if (value instanceof SecretProviderResolutionError) {
+    return value.code === "SECRET_PROVIDER_UNAVAILABLE" ? "secret provider failed" : undefined;
+  }
+  if (!(value instanceof SecretRefResolutionError)) {
+    return undefined;
+  }
+  switch (value.code) {
+    case "SECRET_REF_NOT_FOUND":
+      return "secret reference was not found";
+    case "SECRET_REF_POLICY_DENIED":
+      return "secret provider policy denied resolution";
+    case "SECRET_REF_PROVIDER_ERROR":
+      return "secret provider failed";
+    case "SECRET_REF_PROVIDER_CONTRACT":
+      return "secret provider response violated its contract";
+    case "SECRET_REF_INVALID":
+      return undefined;
+  }
+}
+
 export function providerResolutionError(params: {
+  code?: SecretProviderResolutionCode;
   source: SecretRefSource;
   provider: string;
   message: string;
   cause?: unknown;
 }): SecretProviderResolutionError {
-  return new SecretProviderResolutionError(params);
+  return new SecretProviderResolutionError({
+    ...params,
+    code: params.code ?? "SECRET_PROVIDER_UNAVAILABLE",
+  });
 }
 
 export function refResolutionError(params: {

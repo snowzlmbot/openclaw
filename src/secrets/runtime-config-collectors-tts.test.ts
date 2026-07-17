@@ -1,8 +1,7 @@
-/** Tests for TTS SecretRef assignment metadata and startup optionality. */
+/** Tests for TTS SecretRef assignment ownership. */
 import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { collectTtsApiKeyAssignments } from "./runtime-config-collectors-tts.js";
-import { getOptionalSecretAssignmentReason } from "./runtime-optional-assignment-metadata.js";
 import { createResolverContext } from "./runtime-shared.js";
 
 const TTS_KEY_REF = {
@@ -19,7 +18,7 @@ function createContext() {
 }
 
 describe("collectTtsApiKeyAssignments", () => {
-  it("marks active TTS provider SecretRefs as optional startup assignments", () => {
+  it("assigns active TTS provider SecretRefs to the shared TTS capability owner", () => {
     const tts = {
       providers: {
         elevenlabs: {
@@ -40,10 +39,11 @@ describe("collectTtsApiKeyAssignments", () => {
     expect(context.assignments[0]).toMatchObject({
       path: "messages.tts.providers.elevenlabs.apiKey",
       expected: "string",
+      ownerKind: "capability",
+      ownerId: "tts",
+      requiredForGateway: false,
+      disposition: "isolate",
     });
-    expect(getOptionalSecretAssignmentReason(context.assignments[0] as object)).toContain(
-      "only speech synthesis",
-    );
 
     const resolved = "redacted";
     context.assignments[0]?.apply(resolved);

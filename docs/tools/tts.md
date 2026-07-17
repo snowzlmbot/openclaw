@@ -811,16 +811,14 @@ Reply -> TTS enabled?
   </Accordion>
 
 Provider `apiKey` fields can be raw strings or SecretRefs. During cold Gateway
-startup, before any runtime secrets snapshot is active, these keys are optional
-when the secret value is absent: startup continues, the affected provider is
-kept configured-unavailable, and only speech synthesis requests for that
-provider fail through the normal localized credential-error path. The unresolved
-SecretRef stays in the runtime snapshot so provider environment or profile
-fallbacks cannot silently select a different account. Reloads and config-write
-preflight remain fail-closed so an unavailable TTS ref cannot replace the
-last-known-good snapshot or authorize an unresolved config write. Invalid
-SecretRefs, provider policy/security failures, and non-string resolved values
-also remain fail-closed.
+startup, an unavailable TTS SecretRef marks the built-in TTS capability
+configured-unavailable instead of stopping the Gateway. `tts.speak` then returns
+`UNAVAILABLE` with reason `SECRET_SURFACE_UNAVAILABLE`, and no provider request is
+sent. Status and doctor list the degraded TTS owner and its config paths. The
+explicit refs remain in the runtime snapshot, so environment or profile
+credentials cannot silently select a different account. Reloads and config-write
+preflight remain strict and keep the last-known-good snapshot. Structurally
+invalid refs and resolved values still fail startup.
 
   <Accordion title="Azure Speech">
     <ParamField path="apiKey" type="string">Env: `AZURE_SPEECH_KEY`, `AZURE_SPEECH_API_KEY`, or `SPEECH_KEY`.</ParamField>

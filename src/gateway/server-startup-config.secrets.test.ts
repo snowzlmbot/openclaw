@@ -664,7 +664,7 @@ describe("gateway startup config secret preflight", () => {
     expect(emitStateEvent).not.toHaveBeenCalled();
   });
 
-  it("allows startup snapshots with optional TTS SecretRef warnings", async () => {
+  it("allows cold startup snapshots with isolated SecretRef owners", async () => {
     const sourceConfig = gatewayTokenConfig({
       messages: {
         tts: {
@@ -677,10 +677,10 @@ describe("gateway startup config secret preflight", () => {
       },
     });
     const warning: SecretResolverWarning = {
-      code: "SECRETS_REF_UNAVAILABLE_OPTIONAL",
+      code: "SECRETS_OWNER_UNAVAILABLE",
       path: "messages.tts.providers.elevenlabs.apiKey",
       message:
-        'messages.tts.providers.elevenlabs.apiKey: optional SecretRef "env:default:ELEVENLABS_API_KEY" is unavailable; leaving this capability configured-unavailable until the SecretRef resolves. Environment variable "ELEVENLABS_API_KEY" is missing or empty.',
+        "Secret owner capability:tts is configured-unavailable; paths: messages.tts.providers.elevenlabs.apiKey; reason: secret reference was not found.",
     };
     const prepareRuntimeSecretsSnapshot = vi.fn(async () => ({
       ...preparedSnapshot(sourceConfig),
@@ -704,14 +704,14 @@ describe("gateway startup config secret preflight", () => {
       sourceConfig.messages?.tts?.providers?.elevenlabs?.apiKey,
     );
     expect(prepareRuntimeSecretsSnapshot).toHaveBeenCalledWith(
-      expect.objectContaining({ allowUnavailableOptionalSecrets: true }),
+      expect.objectContaining({ allowUnavailableSecretOwners: true }),
     );
     expect(logSecrets.warn).toHaveBeenCalledWith(`[${warning.code}] ${warning.message}`);
     expect(emitStateEvent).not.toHaveBeenCalled();
   });
 
   it.each(["reload", "restart-check"] as const)(
-    "keeps missing optional TTS SecretRefs fail-closed during %s",
+    "keeps unavailable SecretRef owners fail-closed during %s",
     async (reason) => {
       const missingSecretError = new Error(
         'Environment variable "ELEVENLABS_API_KEY" is missing or empty.',
@@ -733,34 +733,27 @@ describe("gateway startup config secret preflight", () => {
       ).rejects.toThrow(missingSecretError.message);
 
       expect(prepareRuntimeSecretsSnapshot).toHaveBeenCalledWith(
-        expect.objectContaining({ allowUnavailableOptionalSecrets: false }),
+        expect.objectContaining({ allowUnavailableSecretOwners: false }),
       );
       expect(activateRuntimeSecretsSnapshot).not.toHaveBeenCalled();
     },
   );
 
-  it("keeps missing optional TTS SecretRefs fail-closed during non-activating startup preparation", async () => {
-    const missingSecretError = new Error(
-      'Environment variable "ELEVENLABS_API_KEY" is missing or empty.',
-    );
-    const prepareRuntimeSecretsSnapshot = vi.fn(async () => {
-      throw missingSecretError;
-    });
+  it("enables cold-start owner isolation during non-activating startup preparation", async () => {
+    const prepareRuntimeSecretsSnapshot = vi.fn(async ({ config }) => preparedSnapshot(config));
     const activateRuntimeSecretsSnapshot = vi.fn();
     const activateRuntimeSecrets = runtimeSecretsActivatorForTest({
       prepareRuntimeSecretsSnapshot,
       activateRuntimeSecretsSnapshot,
     });
 
-    await expect(
-      activateRuntimeSecrets(gatewayTokenConfig({}), {
-        reason: "startup",
-        activate: false,
-      }),
-    ).rejects.toThrow("Startup failed: required secrets are unavailable.");
+    await activateRuntimeSecrets(gatewayTokenConfig({}), {
+      reason: "startup",
+      activate: false,
+    });
 
     expect(prepareRuntimeSecretsSnapshot).toHaveBeenCalledWith(
-      expect.objectContaining({ allowUnavailableOptionalSecrets: false }),
+      expect.objectContaining({ allowUnavailableSecretOwners: true }),
     );
     expect(activateRuntimeSecretsSnapshot).not.toHaveBeenCalled();
   });
@@ -787,7 +780,7 @@ describe("gateway startup config secret preflight", () => {
     ).rejects.toThrow("Startup failed: required secrets are unavailable.");
 
     expect(prepareRuntimeSecretsSnapshot).toHaveBeenCalledWith(
-      expect.objectContaining({ allowUnavailableOptionalSecrets: false }),
+      expect.objectContaining({ allowUnavailableSecretOwners: false }),
     );
     expect(activateRuntimeSecretsSnapshot).not.toHaveBeenCalled();
   });

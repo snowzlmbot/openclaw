@@ -59,8 +59,8 @@ const loadRuntimePrepareHelpers = createLazyRuntimeModule(
   () => import("./runtime-prepare.runtime.js"),
 );
 
-const loadRuntimeOptionalAssignmentHelpers = createLazyRuntimeModule(
-  () => import("./runtime-optional-assignments.js"),
+const loadRuntimeOwnerAssignmentHelpers = createLazyRuntimeModule(
+  () => import("./runtime-owner-assignments.js"),
 );
 
 async function resolveLoadablePluginOrigins(params: {
@@ -136,8 +136,8 @@ export async function prepareSecretsRuntimeSnapshot(params: {
   loadAuthStore?: (agentDir?: string) => AuthProfileStore;
   manifestRegistry?: Pick<PluginManifestRegistry, "plugins">;
   pluginMetadataSnapshot?: Pick<PluginMetadataSnapshot, "plugins" | "manifestRegistry">;
-  /** Allow missing refs for explicitly optional surfaces during cold Gateway startup only. */
-  allowUnavailableOptionalSecrets?: boolean;
+  /** Isolate known non-Gateway owners with unavailable refs during cold startup only. */
+  allowUnavailableSecretOwners?: boolean;
   /** Test override for discovered loadable plugins and their origins. */
   loadablePluginOrigins?: ReadonlyMap<string, PluginOrigin>;
 }): Promise<PreparedSecretsRuntimeSnapshot> {
@@ -169,6 +169,7 @@ export async function prepareSecretsRuntimeSnapshot(params: {
       authStores,
       authStoreCredentialsRevision,
       warnings: [],
+      degradedOwners: [],
       webTools: createEmptyRuntimeWebToolsMetadata(),
     };
     setPreparedSecretsRuntimeSnapshotRefreshContext(snapshot, {
@@ -188,7 +189,7 @@ export async function prepareSecretsRuntimeSnapshot(params: {
     createResolverContext,
     resolveRuntimeWebTools,
   } = await loadRuntimePrepareHelpers();
-  const { resolveAndApplySecretAssignments } = await loadRuntimeOptionalAssignmentHelpers();
+  const { resolveAndApplySecretAssignments } = await loadRuntimeOwnerAssignmentHelpers();
   const manifestRegistry =
     params.manifestRegistry ?? params.pluginMetadataSnapshot?.manifestRegistry;
   const loadablePluginOrigins =
@@ -231,19 +232,20 @@ export async function prepareSecretsRuntimeSnapshot(params: {
     }
   }
 
-  if (context.assignments.length > 0) {
-    await resolveAndApplySecretAssignments({
-      assignments: context.assignments,
-      context,
-      allowUnavailableOptionalAssignments: params.allowUnavailableOptionalSecrets,
-      options: {
-        config: sourceConfig,
-        env: context.env,
-        cache: context.cache,
-        manifestRegistry: context.manifestRegistry,
-      },
-    });
-  }
+  const degradedOwners =
+    context.assignments.length > 0
+      ? await resolveAndApplySecretAssignments({
+          assignments: context.assignments,
+          context,
+          allowOwnerIsolation: params.allowUnavailableSecretOwners,
+          options: {
+            config: sourceConfig,
+            env: context.env,
+            cache: context.cache,
+            manifestRegistry: context.manifestRegistry,
+          },
+        })
+      : [];
 
   const snapshot = {
     sourceConfig,
@@ -251,6 +253,7 @@ export async function prepareSecretsRuntimeSnapshot(params: {
     authStores,
     authStoreCredentialsRevision,
     warnings: context.warnings,
+    degradedOwners,
     webTools: await resolveRuntimeWebTools({
       sourceConfig,
       resolvedConfig,

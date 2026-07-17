@@ -529,7 +529,7 @@ describe("secrets runtime snapshot discord surface", () => {
       env: {
         DISCORD_BASE_TTS_OK: "base-tts-openai",
       },
-      allowUnavailableOptionalSecrets: true,
+      allowUnavailableSecretOwners: true,
       agentDirs: ["/tmp/openclaw-agent-main"],
       loadAuthStore: () => loadAuthStoreWithProfiles({}),
     });
@@ -550,16 +550,14 @@ describe("secrets runtime snapshot discord surface", () => {
     expect(snapshot.warnings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          code: "SECRETS_REF_UNAVAILABLE_OPTIONAL",
+          code: "SECRETS_OWNER_UNAVAILABLE",
           path: "channels.discord.accounts.enabledOverride.voice.tts.providers.openai.apiKey",
         }),
       ]),
     );
-    const optionalWarning = snapshot.warnings.find(
-      (warning) => warning.code === "SECRETS_REF_UNAVAILABLE_OPTIONAL",
+    const ownerWarning = snapshot.warnings.find(
+      (warning) => warning.code === "SECRETS_OWNER_UNAVAILABLE",
     );
-    expect(optionalWarning?.message).toContain(
-      'Environment variable "DISCORD_ENABLED_OVERRIDE_TTS_MISSING" is missing or empty.',
-    );
+    expect(ownerWarning?.message).toContain("secret reference was not found");
   });
 });

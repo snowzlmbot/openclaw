@@ -57,7 +57,7 @@ describe("secrets runtime snapshot", () => {
     expect(redactSensitiveText(`resolved ${secret}`, { mode: "off" })).toBe("resolved runtim…cret");
   });
 
-  it("registers resolved optional TTS values for exact redaction", async () => {
+  it("registers resolved TTS values for exact redaction", async () => {
     const secret = "test-secret";
     await prepareSecretsRuntimeSnapshot({
       config: asConfig({
@@ -217,7 +217,7 @@ describe("secrets runtime snapshot", () => {
     ).rejects.toThrow('Environment variable "CODEX_APP_SERVER_TOKEN" is missing or empty.');
   });
 
-  it("fails closed for missing optional TTS SecretRefs by default", async () => {
+  it("fails closed for missing TTS SecretRefs outside cold-start isolation", async () => {
     await expect(
       prepareSecretsRuntimeSnapshot({
         config: asConfig({
@@ -238,7 +238,7 @@ describe("secrets runtime snapshot", () => {
     ).rejects.toThrow('Environment variable "ELEVENLABS_API_KEY" is missing or empty.');
   });
 
-  it("degrades optional TTS provider SecretRefs when cold-start policy is enabled", async () => {
+  it("isolates the TTS owner when its SecretRef is missing during cold startup", async () => {
     const snapshot = await prepareSecretsRuntimeSnapshot({
       config: asConfig({
         messages: {
@@ -253,21 +253,28 @@ describe("secrets runtime snapshot", () => {
       }),
       env: {},
       includeAuthStoreRefs: false,
-      allowUnavailableOptionalSecrets: true,
+      allowUnavailableSecretOwners: true,
       loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
     });
 
     expect(snapshot.config.messages?.tts?.providers?.elevenlabs?.apiKey).toEqual(TTS_REF);
     expectWarning(snapshot, {
-      code: "SECRETS_REF_UNAVAILABLE_OPTIONAL",
+      code: "SECRETS_OWNER_UNAVAILABLE",
       path: "messages.tts.providers.elevenlabs.apiKey",
     });
-    expect(snapshot.warnings[0]?.message).toContain(
-      'Environment variable "ELEVENLABS_API_KEY" is missing or empty.',
-    );
+    expect(snapshot.degradedOwners).toMatchObject([
+      {
+        ownerKind: "capability",
+        ownerId: "tts",
+        state: "unavailable",
+        paths: ["messages.tts.providers.elevenlabs.apiKey"],
+        reason: "secret reference was not found",
+      },
+    ]);
+    expect(snapshot.warnings[0]?.message).not.toContain("ELEVENLABS_API_KEY");
   });
 
-  it("degrades optional TTS provider SecretRefs when a file value is absent", async () => {
+  it("isolates the TTS owner when a file value is absent", async () => {
     if (process.platform === "win32") {
       return;
     }
@@ -303,7 +310,7 @@ describe("secrets runtime snapshot", () => {
       }),
       env: {},
       includeAuthStoreRefs: false,
-      allowUnavailableOptionalSecrets: true,
+      allowUnavailableSecretOwners: true,
       loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
     });
 
@@ -313,49 +320,50 @@ describe("secrets runtime snapshot", () => {
       id: "/providers/elevenlabs/apiKey",
     });
     expectWarning(snapshot, {
-      code: "SECRETS_REF_UNAVAILABLE_OPTIONAL",
+      code: "SECRETS_OWNER_UNAVAILABLE",
       path: "messages.tts.providers.elevenlabs.apiKey",
     });
-    expect(snapshot.warnings[0]?.message).toContain(
-      'JSON pointer segment "elevenlabs" does not exist.',
-    );
+    expect(snapshot.warnings[0]?.message).toContain("secret reference was not found");
   });
 
-  it("keeps optional TTS SecretRef provider policy failures fail-closed", async () => {
-    await expect(
-      prepareSecretsRuntimeSnapshot({
-        config: asConfig({
-          secrets: {
-            providers: {
-              default: {
-                source: "env",
-                allowlist: ["OTHER_API_KEY"],
-              },
+  it("isolates known owners after provider policy failures", async () => {
+    const snapshot = await prepareSecretsRuntimeSnapshot({
+      config: asConfig({
+        secrets: {
+          providers: {
+            default: {
+              source: "env",
+              allowlist: ["OTHER_API_KEY"],
             },
           },
-          messages: {
-            tts: {
-              providers: {
-                elevenlabs: {
-                  apiKey: TTS_REF,
-                },
-              },
-            },
-          },
-        }),
-        env: {
-          ELEVENLABS_API_KEY: "test-elevenlabs-api-key",
         },
-        includeAuthStoreRefs: false,
-        allowUnavailableOptionalSecrets: true,
-        loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
+        messages: {
+          tts: {
+            providers: {
+              elevenlabs: {
+                apiKey: TTS_REF,
+              },
+            },
+          },
+        },
       }),
-    ).rejects.toThrow(
-      'Environment variable "ELEVENLABS_API_KEY" is not allowlisted in secrets.providers.default.allowlist.',
-    );
+      env: {
+        ELEVENLABS_API_KEY: "test-elevenlabs-api-key",
+      },
+      includeAuthStoreRefs: false,
+      allowUnavailableSecretOwners: true,
+      loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
+    });
+    expect(snapshot.degradedOwners).toMatchObject([
+      {
+        ownerKind: "capability",
+        ownerId: "tts",
+        reason: "secret provider policy denied resolution",
+      },
+    ]);
   });
 
-  it("keeps invalid optional TTS SecretRef ids fail-closed", async () => {
+  it("keeps invalid TTS SecretRef ids fail-closed", async () => {
     await expect(
       prepareSecretsRuntimeSnapshot({
         config: asConfig({
@@ -373,13 +381,35 @@ describe("secrets runtime snapshot", () => {
           elevenlabs_api_key: "test-elevenlabs-api-key",
         },
         includeAuthStoreRefs: false,
-        allowUnavailableOptionalSecrets: true,
+        allowUnavailableSecretOwners: true,
         loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
       }),
     ).rejects.toThrow("Env secret reference id must match");
   });
 
-  it("keeps optional TTS SecretRefs that resolve to non-strings fail-closed", async () => {
+  it("keeps unconfigured SecretRef provider aliases fail-closed", async () => {
+    await expect(
+      prepareSecretsRuntimeSnapshot({
+        config: asConfig({
+          messages: {
+            tts: {
+              providers: {
+                elevenlabs: {
+                  apiKey: { source: "env", provider: "missing", id: "ELEVENLABS_API_KEY" },
+                },
+              },
+            },
+          },
+        }),
+        env: {},
+        includeAuthStoreRefs: false,
+        allowUnavailableSecretOwners: true,
+        loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
+      }),
+    ).rejects.toThrow('Secret provider "missing" is not configured');
+  });
+
+  it("keeps TTS SecretRefs that resolve to non-strings fail-closed", async () => {
     if (process.platform === "win32") {
       return;
     }
@@ -430,7 +460,7 @@ describe("secrets runtime snapshot", () => {
         }),
         env: {},
         includeAuthStoreRefs: false,
-        allowUnavailableOptionalSecrets: true,
+        allowUnavailableSecretOwners: true,
         loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
       }),
     ).rejects.toThrow(
@@ -451,9 +481,57 @@ describe("secrets runtime snapshot", () => {
         }),
         env: {},
         includeAuthStoreRefs: false,
+        allowUnavailableSecretOwners: true,
         loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
       }),
     ).rejects.toThrow('Environment variable "GATEWAY_TOKEN_REF" is missing or empty.');
+  });
+
+  it("isolates an unavailable model provider without applying another credential source", async () => {
+    const ref = { source: "env", provider: "default", id: "MISSING_PROVIDER_KEY" } as const;
+    const snapshot = await prepareSecretsRuntimeSnapshot({
+      config: asConfig({
+        models: {
+          providers: {
+            example: {
+              apiKey: ref,
+              baseUrl: "https://example.invalid/v1",
+              models: [{ id: "example-model", name: "Example" }],
+            },
+          },
+        },
+      }),
+      env: { EXAMPLE_API_KEY: "placeholder" },
+      includeAuthStoreRefs: false,
+      allowUnavailableSecretOwners: true,
+      loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
+    });
+
+    expect(snapshot.config.models?.providers?.example?.apiKey).toEqual(ref);
+    expect(snapshot.degradedOwners).toMatchObject([
+      {
+        ownerKind: "provider",
+        ownerId: "example",
+        state: "unavailable",
+        paths: ["models.providers.example.apiKey"],
+      },
+    ]);
+  });
+
+  it("refuses cold-start isolation when an assignment owner is unknown", async () => {
+    await expect(
+      prepareSecretsRuntimeSnapshot({
+        config: asConfig({
+          cron: {
+            webhookToken: { source: "env", provider: "default", id: "MISSING_WEBHOOK_TOKEN" },
+          },
+        }),
+        env: {},
+        includeAuthStoreRefs: false,
+        allowUnavailableSecretOwners: true,
+        loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
+      }),
+    ).rejects.toThrow('Environment variable "MISSING_WEBHOOK_TOKEN" is missing or empty.');
   });
 
   it("fails when an active exec ref id contains traversal segments", async () => {

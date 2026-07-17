@@ -152,6 +152,7 @@ function resolveConfiguredProvider(params: {
       return { source: "env" };
     }
     throw providerResolutionError({
+      code: "SECRET_PROVIDER_INVALID",
       source: ref.source,
       provider: ref.provider,
       message: `Secret provider "${ref.provider}" is not configured (ref: ${ref.source}:${ref.provider}:${ref.id}).`,
@@ -159,6 +160,7 @@ function resolveConfiguredProvider(params: {
   }
   if (providerConfig.source !== ref.source) {
     throw providerResolutionError({
+      code: "SECRET_PROVIDER_INVALID",
       source: ref.source,
       provider: ref.provider,
       message: `Secret provider "${ref.provider}" has source "${providerConfig.source}" but ref requests "${ref.source}".`,

@@ -5,6 +5,7 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ErrorCodes } from "../../../packages/gateway-protocol/src/index.js";
+import { setActiveDegradedSecretOwners } from "../../secrets/runtime-degraded-state.js";
 import { expectGatewayErrorResponse } from "./gateway-response.test-helpers.js";
 
 const mocks = vi.hoisted(() => ({
@@ -69,6 +70,7 @@ vi.mock("../../tts/tts.js", () => ({
 
 describe("ttsHandlers", () => {
   beforeEach(() => {
+    setActiveDegradedSecretOwners([]);
     mocks.getRuntimeConfig.mockReset();
     mocks.getRuntimeConfig.mockReturnValue({});
     mocks.resolveExplicitTtsOverrides.mockReset();
@@ -209,11 +211,17 @@ describe("ttsHandlers", () => {
     });
   });
 
-  it("tts.speak keeps degraded credential failures localized to TTS", async () => {
-    mocks.synthesizeSpeech.mockResolvedValue({
-      success: false,
-      error: "TTS conversion failed: elevenlabs: unresolved SecretRef",
-    });
+  it("tts.speak returns typed unavailable without calling a degraded TTS provider", async () => {
+    setActiveDegradedSecretOwners([
+      {
+        ownerKind: "capability",
+        ownerId: "tts",
+        state: "unavailable",
+        paths: ["messages.tts.providers.elevenlabs.apiKey"],
+        refKeys: ["env:default:ELEVENLABS_API_KEY"],
+        reason: "secret reference was not found",
+      },
+    ]);
 
     const { ttsHandlers } = await import("./tts.js");
     const respond = vi.fn();
@@ -229,7 +237,16 @@ describe("ttsHandlers", () => {
 
     expectGatewayErrorResponse(respond, {
       code: ErrorCodes.UNAVAILABLE,
-      message: "TTS conversion failed: elevenlabs: unresolved SecretRef",
+      message:
+        "SecretSurfaceUnavailableError: Secret owner capability:tts is configured but unavailable (secret reference was not found).: code=SECRET_SURFACE_UNAVAILABLE",
     });
+    expect(respond.mock.calls[0]?.[2]).toMatchObject({
+      details: {
+        reason: "SECRET_SURFACE_UNAVAILABLE",
+        ownerKind: "capability",
+        ownerId: "tts",
+      },
+    });
+    expect(mocks.synthesizeSpeech).not.toHaveBeenCalled();
   });
 });
