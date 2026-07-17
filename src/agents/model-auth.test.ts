@@ -891,6 +891,7 @@ describe("resolveApiKeyForProvider", () => {
         providers: {
           openai: {
             apiKey: { source: "env", provider: "default", id: "MISSING_OPENAI_KEY" } as const,
+            baseUrl: "https://api.openai.com/v1",
             models: [],
           },
         },
@@ -937,6 +938,7 @@ describe("resolveApiKeyForProvider", () => {
       models: {
         providers: {
           openai: {
+            baseUrl: "https://api.openai.com/v1",
             headers: {
               "X-Provider-Secret": {
                 source: "env",

@@ -62,6 +62,7 @@ describe("Gateway startup SecretRef owner isolation", () => {
                   provider: "default",
                   id: "MISSING_UNUSED_PROVIDER_KEY",
                 },
+                baseUrl: "https://api.openai.com/v1",
                 models: [],
               },
             },
