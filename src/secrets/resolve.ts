@@ -83,6 +83,12 @@ type ResolutionLimits = {
 
 type ProviderResolutionOutput = Map<string, unknown>;
 
+type ProviderRefGroup = {
+  source: SecretRefSource;
+  providerName: string;
+  refs: SecretRef[];
+};
+
 export { isMissingSecretRefResolutionError, isProviderScopedSecretResolutionError };
 
 function throwUnknownProviderResolutionError(params: {
@@ -700,15 +706,10 @@ async function resolveProviderRefs(params: {
   }
 }
 
-/** Resolves a batch of SecretRefs, grouped by provider for bounded provider concurrency. */
-export async function resolveSecretRefValues(
-  refs: SecretRef[],
-  options: ResolveSecretRefOptions,
-): Promise<Map<string, unknown>> {
+function normalizeAndGroupSecretRefs(refs: SecretRef[]): ProviderRefGroup[] {
   if (refs.length === 0) {
-    return new Map();
+    return [];
   }
-  const limits = resolveResolutionLimits(options.config);
   const uniqueRefs = new Map<string, SecretRef>();
   for (const ref of refs) {
     const id = ref.id.trim();
@@ -738,10 +739,7 @@ export async function resolveSecretRefValues(
     uniqueRefs.set(secretRefKey(ref), { ...ref, id });
   }
 
-  const grouped = new Map<
-    string,
-    { source: SecretRefSource; providerName: string; refs: SecretRef[] }
-  >();
+  const grouped = new Map<string, ProviderRefGroup>();
   for (const ref of uniqueRefs.values()) {
     // Provider calls are batched by source/provider so exec providers receive one request for
     // many ids and file providers parse once per payload.
@@ -753,59 +751,112 @@ export async function resolveSecretRefValues(
     }
     grouped.set(key, { source: ref.source, providerName: ref.provider, refs: [ref] });
   }
+  return [...grouped.values()];
+}
 
-  const tasks = [...grouped.values()].map(
-    (group) => async (): Promise<{ group: typeof group; values: ProviderResolutionOutput }> => {
-      if (group.refs.length > limits.maxRefsPerProvider) {
+function createProviderResolutionTasks(params: {
+  groups: ProviderRefGroup[];
+  options: ResolveSecretRefOptions;
+  limits: ResolutionLimits;
+}) {
+  return params.groups.map(
+    (group) => async (): Promise<{ group: ProviderRefGroup; values: ProviderResolutionOutput }> => {
+      if (group.refs.length > params.limits.maxRefsPerProvider) {
         throw providerResolutionError({
           source: group.source,
           provider: group.providerName,
-          message: `Secret provider "${group.providerName}" exceeded maxRefsPerProvider (${limits.maxRefsPerProvider}).`,
+          message: `Secret provider "${group.providerName}" exceeded maxRefsPerProvider (${params.limits.maxRefsPerProvider}).`,
         });
       }
       const providerConfig = resolveConfiguredProvider({
         ref: expectDefined(group.refs[0], "refs entry at 0"),
-        config: options.config,
-        env: options.env ?? process.env,
-        manifestRegistry: options.manifestRegistry,
+        config: params.options.config,
+        env: params.options.env ?? process.env,
+        manifestRegistry: params.options.manifestRegistry,
       });
       const values = await resolveProviderRefs({
         refs: group.refs,
         source: group.source,
         providerName: group.providerName,
         providerConfig,
-        options,
-        limits,
+        options: params.options,
+        limits: params.limits,
       });
+      for (const ref of group.refs) {
+        if (!values.has(ref.id)) {
+          throw refResolutionError({
+            code: "SECRET_REF_PROVIDER_CONTRACT",
+            source: group.source,
+            provider: group.providerName,
+            refId: ref.id,
+            message: `Secret provider "${group.providerName}" did not return id "${ref.id}".`,
+          });
+        }
+      }
       return { group, values };
     },
   );
+}
 
+async function resolveSecretRefProviderGroups(params: {
+  refs: SecretRef[];
+  options: ResolveSecretRefOptions;
+  errorMode: "continue" | "stop";
+}) {
+  const groups = normalizeAndGroupSecretRefs(params.refs);
+  const limits = resolveResolutionLimits(params.options.config);
+  const errorsByIndex = new Map<number, unknown>();
   const taskResults = await runTasksWithConcurrency({
-    tasks,
+    tasks: createProviderResolutionTasks({ groups, options: params.options, limits }),
     limit: limits.maxProviderConcurrency,
-    errorMode: "stop",
+    errorMode: params.errorMode,
+    onTaskError: (error, index) => {
+      errorsByIndex.set(index, error);
+    },
   });
-  if (taskResults.hasError) {
-    throw taskResults.firstError;
-  }
 
   const resolved = new Map<string, unknown>();
   for (const result of taskResults.results) {
+    if (!result) {
+      continue;
+    }
     for (const ref of result.group.refs) {
-      if (!result.values.has(ref.id)) {
-        throw refResolutionError({
-          code: "SECRET_REF_PROVIDER_CONTRACT",
-          source: result.group.source,
-          provider: result.group.providerName,
-          refId: ref.id,
-          message: `Secret provider "${result.group.providerName}" did not return id "${ref.id}".`,
-        });
-      }
       resolved.set(secretRefKey(ref), result.values.get(ref.id));
     }
   }
-  return resolved;
+  const failures: Array<{ group: ProviderRefGroup; error: unknown }> = [];
+  for (const [index, group] of groups.entries()) {
+    if (errorsByIndex.has(index)) {
+      failures.push({ group, error: errorsByIndex.get(index) });
+    }
+  }
+  return {
+    resolved,
+    failures,
+    hasError: taskResults.hasError,
+    firstError: taskResults.firstError,
+  };
+}
+
+/** Resolves a batch of SecretRefs, grouped by provider for bounded provider concurrency. */
+export async function resolveSecretRefValues(
+  refs: SecretRef[],
+  options: ResolveSecretRefOptions,
+): Promise<Map<string, unknown>> {
+  const result = await resolveSecretRefProviderGroups({ refs, options, errorMode: "stop" });
+  if (result.hasError) {
+    throw result.firstError;
+  }
+  return result.resolved;
+}
+
+/** Internal owner-isolation resolver that preserves one provider call per batch. */
+export async function resolveSecretRefValuesSettledByProvider(
+  refs: SecretRef[],
+  options: ResolveSecretRefOptions,
+) {
+  const result = await resolveSecretRefProviderGroups({ refs, options, errorMode: "continue" });
+  return { resolved: result.resolved, failures: result.failures };
 }
 
 /** Resolves one SecretRef, using the optional shared runtime cache. */

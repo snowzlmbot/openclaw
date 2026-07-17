@@ -1,8 +1,12 @@
 /** Resolves SecretRef assignments atomically by owning runtime surface. */
 import { registerSecretValueForRedaction } from "../logging/secret-redaction-registry.js";
 import { secretRefKey } from "./ref-contract.js";
-import { describeSecretResolutionError } from "./resolve-errors.js";
-import { resolveSecretRefValues } from "./resolve.js";
+import {
+  describeSecretResolutionError,
+  isProviderScopedSecretResolutionError,
+  isSecretResolutionError,
+} from "./resolve-errors.js";
+import { resolveSecretRefValues, resolveSecretRefValuesSettledByProvider } from "./resolve.js";
 import type { DegradedSecretOwner } from "./runtime-degraded-state.js";
 import {
   applyResolvedAssignments,
@@ -85,6 +89,30 @@ async function resolveStrictAssignments(params: {
   applyResolvedAssignments({ assignments: params.assignments, resolved });
 }
 
+function assignmentMatchesResolutionFailure(assignment: SecretAssignment, error: unknown): boolean {
+  if (!isSecretResolutionError(error)) {
+    return false;
+  }
+  if (assignment.ref.source !== error.source || assignment.ref.provider !== error.provider) {
+    return false;
+  }
+  return isProviderScopedSecretResolutionError(error) || assignment.ref.id.trim() === error.refId;
+}
+
+function assertOwnerCanBeIsolated(assignments: SecretAssignment[], error: unknown): string {
+  const owner = assignments[0]!;
+  const reason = describeSecretResolutionError(error);
+  if (
+    !reason ||
+    owner.ownerKind === "unknown" ||
+    owner.requiredForGateway ||
+    owner.disposition === "fail-closed"
+  ) {
+    throw error;
+  }
+  return reason;
+}
+
 export async function resolveAndApplySecretAssignments(params: {
   assignments: SecretAssignment[];
   context: ResolverContext;
@@ -97,26 +125,54 @@ export async function resolveAndApplySecretAssignments(params: {
   }
 
   const degradedOwners: DegradedSecretOwner[] = [];
-  for (const assignments of groupAssignmentsByOwner(params.assignments)) {
-    try {
-      await resolveStrictAssignments({ assignments, options: params.options });
-    } catch (error) {
-      const owner = assignments[0]!;
-      const reason = describeSecretResolutionError(error);
-      if (
-        !reason ||
-        owner.ownerKind === "unknown" ||
-        owner.requiredForGateway ||
-        owner.disposition === "fail-closed"
-      ) {
-        throw error;
+  let pendingOwners = groupAssignmentsByOwner(params.assignments);
+  while (pendingOwners.length > 0) {
+    const resolution = await resolveSecretRefValuesSettledByProvider(
+      pendingOwners.flat().map((assignment) => assignment.ref),
+      params.options,
+    );
+    registerResolvedValuesForRedaction(resolution.resolved);
+
+    const failedOwners = new Map<SecretAssignment[], string>();
+    for (const failure of resolution.failures) {
+      const matchingOwners = pendingOwners.filter((assignments) =>
+        assignments.some((assignment) =>
+          assignmentMatchesResolutionFailure(assignment, failure.error),
+        ),
+      );
+      if (matchingOwners.length === 0) {
+        throw failure.error;
       }
-      // Leave the explicit SecretRefs in runtime config. Applying another credential source here
-      // would silently route this owner through env/profile fallback after its declared ref failed.
-      const degradedOwner = createDegradedOwner(assignments, reason);
-      degradedOwners.push(degradedOwner);
-      warnDegradedOwner(params.context, degradedOwner);
+      for (const assignments of matchingOwners) {
+        if (!failedOwners.has(assignments)) {
+          failedOwners.set(assignments, assertOwnerCanBeIsolated(assignments, failure.error));
+        }
+      }
     }
+
+    const nextPendingOwners: SecretAssignment[][] = [];
+    for (const assignments of pendingOwners) {
+      const failureReason = failedOwners.get(assignments);
+      if (failureReason) {
+        // Leave explicit SecretRefs in runtime config. Applying another credential source here
+        // would silently route this owner through env/profile fallback after its declared ref failed.
+        const degradedOwner = createDegradedOwner(assignments, failureReason);
+        degradedOwners.push(degradedOwner);
+        warnDegradedOwner(params.context, degradedOwner);
+        continue;
+      }
+      if (
+        assignments.every((assignment) => resolution.resolved.has(secretRefKey(assignment.ref)))
+      ) {
+        applyResolvedAssignments({ assignments, resolved: resolution.resolved });
+        continue;
+      }
+      nextPendingOwners.push(assignments);
+    }
+    if (nextPendingOwners.length === pendingOwners.length) {
+      throw resolution.failures[0]?.error ?? new Error("Secret resolution made no progress.");
+    }
+    pendingOwners = nextPendingOwners;
   }
   return degradedOwners;
 }
