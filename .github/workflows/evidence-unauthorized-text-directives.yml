@@ -1,0 +1,203 @@
+name: Evidence - unauthorized text directives
+
+on:
+  push:
+    branches:
+      - evidence/unauthorized-text-directives-20260718
+    paths-ignore:
+      - evidence/unauthorized-text-directives/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evidence-unauthorized-text-directives-20260718
+  cancel-in-progress: false
+
+jobs:
+  before-after:
+    name: Reproduce before fix and verify after fix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      BASE_SHA: 1aa0d73823a0968510186b102da77fad86610793
+      FIX_SHA: 5d8e088ac60ea71cd3d8e2425470fd68e315bb53
+      FIX_BRANCH: fix/preserve-unauthorized-text-directives
+
+    steps:
+      - name: Check out official baseline
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ env.BASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node and dependencies
+        uses: ./.github/actions/setup-node-env
+        with:
+          node-version: 24.15.0
+          install-bun: "false"
+          install-deps: "true"
+          frozen-lockfile: "true"
+          use-actions-cache: "true"
+
+      - name: Fetch exact fix commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "${FIX_BRANCH}"
+          test "$(git rev-parse FETCH_HEAD)" = "${FIX_SHA}"
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git cat-file -e "${FIX_SHA}^{commit}"
+
+      - name: Reproduce the baseline failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/unauthorized-text-directives
+
+          # Use the exact regression test from the fix commit while keeping the
+          # production source at the official baseline.
+          git checkout "${FIX_SHA}" -- \
+            src/auto-reply/reply/get-reply-directives.target-session.test.ts
+
+          set +e
+          node scripts/run-vitest.mjs \
+            src/auto-reply/reply/get-reply-directives.target-session.test.ts \
+            -t "preserves unauthorized text directive" \
+            2>&1 | tee evidence/unauthorized-text-directives/before.log
+          test_status=${PIPESTATUS[0]}
+          set -e
+
+          if [[ "${test_status}" -eq 0 ]]; then
+            echo "The official baseline unexpectedly passed the regression test." >&2
+            exit 1
+          fi
+          grep -Fq "preserves unauthorized text directive" \
+            evidence/unauthorized-text-directives/before.log
+          grep -Eq "AssertionError|expected .* to" \
+            evidence/unauthorized-text-directives/before.log
+
+          {
+            echo "result=expected-failure"
+            echo "base_sha=${BASE_SHA}"
+            echo "test_exit=${test_status}"
+          } > evidence/unauthorized-text-directives/before-summary.txt
+
+      - name: Verify the exact fix commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git reset --hard "${BASE_SHA}"
+          git checkout --detach "${FIX_SHA}"
+          test "$(git rev-parse HEAD)" = "${FIX_SHA}"
+
+          node scripts/run-vitest.mjs \
+            src/auto-reply/reply/get-reply-directives.target-session.test.ts \
+            src/auto-reply/reply/get-reply-run.media-only.test.ts \
+            2>&1 | tee evidence/unauthorized-text-directives/after.log
+
+          node scripts/check-changed.mjs -- \
+            src/auto-reply/reply/get-reply-directives.ts \
+            src/auto-reply/reply/get-reply.ts \
+            src/auto-reply/reply/get-reply-run.ts \
+            src/auto-reply/reply/get-reply-directives.target-session.test.ts \
+            src/auto-reply/reply/get-reply-run.media-only.test.ts \
+            2>&1 | tee -a evidence/unauthorized-text-directives/after.log
+
+          {
+            echo "result=passed"
+            echo "base_sha=${BASE_SHA}"
+            echo "fix_sha=${FIX_SHA}"
+          } > evidence/unauthorized-text-directives/after-summary.txt
+
+      - name: Render sanitized comparison image
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/ensure-playwright-chromium.mjs
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import { chromium } from "playwright";
+
+          const baseSha = process.env.BASE_SHA;
+          const fixSha = process.env.FIX_SHA;
+          const readTail = (path) =>
+            fs.readFileSync(path, "utf8").split("\n").slice(-120).join("\n");
+          const escapeHtml = (value) =>
+            value
+              .replaceAll("&", "&amp;")
+              .replaceAll("<", "&lt;")
+              .replaceAll(">", "&gt;");
+
+          const before = escapeHtml(
+            readTail("evidence/unauthorized-text-directives/before.log"),
+          );
+          const after = escapeHtml(
+            readTail("evidence/unauthorized-text-directives/after.log"),
+          );
+          const html = `<!doctype html>
+          <html>
+            <head>
+              <meta charset="utf-8" />
+              <style>
+                * { box-sizing: border-box; }
+                body { margin: 0; padding: 32px; background: #111827; color: #f9fafb; font-family: Inter, Arial, sans-serif; }
+                h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: 0; }
+                .meta { color: #cbd5e1; margin-bottom: 24px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+                .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+                .panel { border: 2px solid; border-radius: 8px; overflow: hidden; background: #030712; }
+                .before { border-color: #ef4444; }
+                .after { border-color: #22c55e; }
+                .label { padding: 12px 16px; font-weight: 700; font-size: 18px; }
+                .before .label { background: #7f1d1d; }
+                .after .label { background: #14532d; }
+                pre { margin: 0; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: #e5e7eb; }
+              </style>
+            </head>
+            <body>
+              <h1>Unauthorized text directive regression proof</h1>
+              <div class="meta">official base ${baseSha} | fix ${fixSha}</div>
+              <div class="grid">
+                <section class="panel before">
+                  <div class="label">BEFORE: expected regression failure</div>
+                  <pre>${before}</pre>
+                </section>
+                <section class="panel after">
+                  <div class="label">AFTER: targeted tests and changed-file checks pass</div>
+                  <pre>${after}</pre>
+                </section>
+              </div>
+            </body>
+          </html>`;
+
+          const browser = await chromium.launch({ headless: true });
+          const page = await browser.newPage({ viewport: { width: 1800, height: 1000 } });
+          await page.setContent(html, { waitUntil: "load" });
+          await page.screenshot({
+            path: "evidence/unauthorized-text-directives/comparison.png",
+            fullPage: true,
+          });
+          await browser.close();
+          NODE
+
+      - name: Write evidence summary
+        shell: bash
+        run: |
+          {
+            echo "## Unauthorized text directive proof"
+            echo
+            echo "- Official base: \`${BASE_SHA}\`"
+            echo "- Fix commit: \`${FIX_SHA}\`"
+            echo "- Before: the regression test fails on the official base as expected."
+            echo "- After: both targeted test files and changed-file checks pass on the exact fix commit."
+            echo "- Artifact: sanitized raw logs, summaries, and a rendered before/after comparison image."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload evidence artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: unauthorized-text-directives-before-after
+          path: evidence/unauthorized-text-directives
+          if-no-files-found: error
+          retention-days: 90
