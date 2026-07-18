@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 45
     env:
       BASE_SHA: 1aa0d73823a0968510186b102da77fad86610793
-      FIX_SHA: 5d8e088ac60ea71cd3d8e2425470fd68e315bb53
+      FIX_SHA: 5eb705987f90ed8197d18007d8b5fccd51d851ba
       FIX_BRANCH: fix/preserve-unauthorized-text-directives
 
     steps:
