@@ -440,6 +440,7 @@ type RunPreparedReplyParams = {
   command: ReturnType<typeof buildCommandContext>;
   commandSource?: string;
   allowTextCommands: boolean;
+  preserveUnauthorizedDirectiveText: boolean;
   directives: InlineDirectives;
   defaultActivation: Parameters<typeof buildGroupIntro>[0]["defaultActivation"];
   resolvedThinkLevel: ThinkLevel | undefined;
@@ -503,6 +504,7 @@ export async function runPreparedReply(
     commandAuthorized,
     command,
     allowTextCommands,
+    preserveUnauthorizedDirectiveText,
     directives,
     defaultActivation,
     elevatedEnabled,
@@ -718,6 +720,7 @@ export async function runPreparedReply(
   if (
     allowTextCommands &&
     (!commandAuthorized || !command.isAuthorizedSender) &&
+    !preserveUnauthorizedDirectiveText &&
     isWholeMessageCommand &&
     (hasControlCommand(rawBodyTrimmed, cfg) || isResetOrNewCommand)
   ) {
@@ -769,7 +772,9 @@ export async function runPreparedReply(
       : null;
   const baseBodyFinal = isBareSessionReset
     ? (bareResetPromptState?.prompt ?? "")
-    : stripPromptThinkingDirectives(baseBody);
+    : preserveUnauthorizedDirectiveText
+      ? baseBody
+      : stripPromptThinkingDirectives(baseBody);
   const hasUserBody =
     baseBodyFinal.trim().length > 0 ||
     softResetTail.length > 0 ||

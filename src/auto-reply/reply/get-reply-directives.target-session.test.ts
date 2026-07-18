@@ -69,6 +69,26 @@ function parseInlineDirectivesForTest(body: string) {
       execSecurity: undefined,
     };
   }
+  const thinkDirective = normalized.match(
+    /(?:^|\s)\/(?:thinking|think|t)\s+(off|low|medium|high|xhigh)(?=$|\s)/i,
+  );
+  if (thinkDirective) {
+    const thinkLevel = thinkDirective[1]?.toLowerCase() as
+      | "off"
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh";
+    const cleaned = normalized.replace(thinkDirective[0], " ").replace(/\s+/g, " ").trim();
+    return {
+      ...parseInlineDirectivesForTest(cleaned),
+      cleaned,
+      hasThinkDirective: true,
+      thinkLevel,
+      rawThinkLevel: thinkLevel,
+      clearThinkLevel: false,
+    };
+  }
   if (normalized === "/reasoning stream") {
     return {
       cleaned: "",
@@ -839,6 +859,30 @@ describe("resolveReplyDirectives", () => {
     expect(resolveDefaultReasoningLevel).not.toHaveBeenCalled();
   });
 
+  it.each(["/thinking xhigh", "summarize this /thinking xhigh"])(
+    "preserves unauthorized text directive %s as plain text",
+    async (body) => {
+      const { result } = await resolveHelloWithModelDefaults({
+        body,
+        defaultThinking: "off",
+        defaultReasoning: "on",
+      });
+
+      expectContinueResult(result, {
+        cleanedBody: body,
+        preserveUnauthorizedDirectiveText: true,
+      });
+      if (result.kind !== "continue") {
+        throw new Error(`expected continue result, got ${result.kind}`);
+      }
+      expect(result.result.directives).toMatchObject({
+        cleaned: body,
+        hasThinkDirective: false,
+        thinkLevel: undefined,
+      });
+    },
+  );
+
   it("ignores inline reasoning directives from untrusted senders", async () => {
     const { result, resolveDefaultReasoningLevel } = await resolveHelloWithModelDefaults({
       body: "/reasoning stream",
@@ -847,7 +891,17 @@ describe("resolveReplyDirectives", () => {
     });
 
     expectContinueResult(result, {
+      cleanedBody: "/reasoning stream",
+      preserveUnauthorizedDirectiveText: true,
       resolvedReasoningLevel: "off",
+    });
+    if (result.kind !== "continue") {
+      throw new Error(`expected continue result, got ${result.kind}`);
+    }
+    expect(result.result.directives).toMatchObject({
+      cleaned: "/reasoning stream",
+      hasReasoningDirective: false,
+      reasoningLevel: undefined,
     });
     expect(resolveDefaultReasoningLevel).not.toHaveBeenCalled();
   });

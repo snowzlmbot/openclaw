@@ -86,6 +86,20 @@ function canUseFastExplicitModelDirective(params: {
   );
 }
 
+function hasInlineDirective(directives: InlineDirectives): boolean {
+  return (
+    directives.hasThinkDirective ||
+    directives.hasVerboseDirective ||
+    directives.hasTraceDirective ||
+    directives.hasFastDirective ||
+    directives.hasReasoningDirective ||
+    directives.hasElevatedDirective ||
+    directives.hasExecDirective ||
+    directives.hasModelDirective ||
+    directives.hasQueueDirective
+  );
+}
+
 function resolveDirectiveCommandText(params: { ctx: MsgContext; sessionCtx: TemplateContext }) {
   const commandSource =
     params.sessionCtx.BodyForCommands ??
@@ -115,6 +129,7 @@ type ReplyDirectiveContinuation = {
   command: ReturnType<typeof buildCommandContext>;
   allowTextCommands: boolean;
   skillCommands?: SkillCommandSpec[];
+  preserveUnauthorizedDirectiveText: boolean;
   directives: InlineDirectives;
   cleanedBody: string;
   messageProviderKey: string;
@@ -294,6 +309,7 @@ export async function resolveReplyDirectives(params: {
     modelAliases: configuredAliases,
     allowStatusDirective,
   });
+  const hadDirectiveAttempt = hasInlineDirective(parsedDirectives);
   const hasInlineStatus =
     parsedDirectives.hasStatusDirective && parsedDirectives.cleaned.trim().length > 0;
   if (hasInlineStatus) {
@@ -317,17 +333,7 @@ export async function resolveReplyDirectives(params: {
       parsedDirectives = clearExecInlineDirectives(parsedDirectives);
     }
   }
-  const hasInlineDirective =
-    parsedDirectives.hasThinkDirective ||
-    parsedDirectives.hasVerboseDirective ||
-    parsedDirectives.hasTraceDirective ||
-    parsedDirectives.hasFastDirective ||
-    parsedDirectives.hasReasoningDirective ||
-    parsedDirectives.hasElevatedDirective ||
-    parsedDirectives.hasExecDirective ||
-    parsedDirectives.hasModelDirective ||
-    parsedDirectives.hasQueueDirective;
-  if (hasInlineDirective) {
+  if (hasInlineDirective(parsedDirectives)) {
     const stripped = stripStructuralPrefixes(parsedDirectives.cleaned);
     const noMentions = isGroup ? stripMentions(stripped, ctx, cfg, agentId) : stripped;
     if (noMentions.trim().length > 0) {
@@ -350,25 +356,17 @@ export async function resolveReplyDirectives(params: {
   // to ensure inline directives work when commands.allowFrom grants access (e.g., LINE).
   const unauthorizedReasoningDirectiveAttempt =
     !command.isAuthorizedSender && parsedDirectives.hasReasoningDirective;
+  // Carry this fact through later command suppression and defensive prompt cleanup so an
+  // unauthorized directive remains ordinary user text instead of disappearing.
+  const preserveUnauthorizedDirectiveText = !command.isAuthorizedSender && hadDirectiveAttempt;
   let directives = command.isAuthorizedSender
     ? parsedDirectives
-    : {
-        ...parsedDirectives,
-        hasThinkDirective: false,
-        clearThinkLevel: false,
-        hasVerboseDirective: false,
-        hasFastDirective: false,
-        clearFastMode: false,
-        hasReasoningDirective: false,
-        reasoningLevel: undefined,
-        rawReasoningLevel: undefined,
-        hasStatusDirective: false,
-        hasModelDirective: false,
-        hasQueueDirective: false,
-        queueReset: false,
-      };
+    : clearInlineDirectives(commandText);
   const existingBody = sessionCtx.BodyStripped ?? sessionCtx.Body ?? "";
   let cleanedBody = (() => {
+    if (!command.isAuthorizedSender) {
+      return existingBody || commandText;
+    }
     if (!existingBody) {
       if (resetTriggered) {
         return "";
@@ -706,6 +704,7 @@ export async function resolveReplyDirectives(params: {
       command,
       allowTextCommands,
       skillCommands,
+      preserveUnauthorizedDirectiveText,
       directives,
       cleanedBody,
       messageProviderKey,

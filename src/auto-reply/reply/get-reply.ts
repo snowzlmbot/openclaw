@@ -745,6 +745,7 @@ export async function getReplyFromConfig(
           cfg,
           commandSource: finalized.CommandSource,
         }),
+        preserveUnauthorizedDirectiveText: false,
         directives: clearInlineDirectives(
           finalized.BodyForCommands ?? finalized.CommandBody ?? finalized.RawBody ?? "",
         ),
@@ -831,6 +832,7 @@ export async function getReplyFromConfig(
     command,
     allowTextCommands,
     skillCommands,
+    preserveUnauthorizedDirectiveText,
     elevatedEnabled,
     elevatedAllowed,
     elevatedFailures,
@@ -1041,6 +1043,7 @@ export async function getReplyFromConfig(
       command,
       commandSource,
       allowTextCommands,
+      preserveUnauthorizedDirectiveText,
       directives,
       defaultActivation,
       resolvedThinkLevel,

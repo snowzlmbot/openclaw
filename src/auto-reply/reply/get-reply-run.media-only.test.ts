@@ -44,6 +44,7 @@ vi.mock("../../config/sessions/paths.js", () => ({
 const loadSessionEntryMock = vi.hoisted(() => vi.fn());
 const updateAmbientTranscriptWatermarkMock = vi.hoisted(() => vi.fn().mockResolvedValue(null));
 const consumeSessionSkillSuggestionMock = vi.hoisted(() => vi.fn());
+const hasControlCommandMock = vi.hoisted(() => vi.fn().mockReturnValue(false));
 
 vi.mock("../../config/sessions/session-accessor.js", () => ({
   listSessionEntries: vi.fn().mockReturnValue([]),
@@ -83,7 +84,7 @@ vi.mock("../../utils/provider-utils.js", () => ({
 }));
 
 vi.mock("../command-detection.js", () => ({
-  hasControlCommand: vi.fn().mockReturnValue(false),
+  hasControlCommand: (...args: unknown[]) => hasControlCommandMock(...args),
 }));
 
 vi.mock("./agent-runner.runtime.js", () => ({
@@ -218,6 +219,7 @@ function baseParams(
     } as never,
     commandSource: "",
     allowTextCommands: true,
+    preserveUnauthorizedDirectiveText: false,
     directives: {
       hasThinkDirective: false,
       thinkLevel: undefined,
@@ -258,6 +260,22 @@ function ownerParams(): Parameters<typeof runPreparedReply>[0] {
   params.command = {
     ...(params.command as Record<string, unknown>),
     senderIsOwner: true,
+  } as never;
+  return params;
+}
+
+function unauthorizedTextParams(body: string, preserveUnauthorizedDirectiveText: boolean) {
+  const params = baseParams({
+    ctx: { Body: body, RawBody: body, CommandBody: body },
+    sessionCtx: { Body: body, BodyStripped: body, Provider: "slack" },
+    commandAuthorized: false,
+    preserveUnauthorizedDirectiveText,
+  });
+  params.command = {
+    ...(params.command as Record<string, unknown>),
+    isAuthorizedSender: false,
+    rawBodyNormalized: body,
+    commandBodyNormalized: body,
   } as never;
   return params;
 }
@@ -318,6 +336,7 @@ describe("runPreparedReply media-only handling", () => {
     loadSessionEntryMock.mockReset();
     consumeSessionSkillSuggestionMock.mockReset();
     updateAmbientTranscriptWatermarkMock.mockClear();
+    hasControlCommandMock.mockReset().mockReturnValue(false);
     vi.clearAllMocks();
     vi.mocked(buildDirectChatContext).mockReturnValue("");
     vi.mocked(buildGroupIntro).mockReturnValue("");
@@ -971,6 +990,25 @@ describe("runPreparedReply media-only handling", () => {
     expect(result).toEqual({
       text: "I didn't receive any text in your message. Please resend or add a caption.",
     });
+    expect(vi.mocked(runReplyAgent)).not.toHaveBeenCalled();
+  });
+
+  it.each(["/thinking xhigh", "/reasoning stream"])(
+    "passes unauthorized directive %s to the agent as plain text",
+    async (body) => {
+      hasControlCommandMock.mockReturnValue(true);
+      const result = await runPreparedReply(unauthorizedTextParams(body, true));
+
+      expect(result).toEqual({ text: "ok" });
+      expect(requireRunReplyAgentCall().followupRun.prompt).toBe(body);
+    },
+  );
+
+  it("still suppresses unauthorized command-only messages", async () => {
+    hasControlCommandMock.mockReturnValue(true);
+    const result = await runPreparedReply(unauthorizedTextParams("/status", false));
+
+    expect(result).toBeUndefined();
     expect(vi.mocked(runReplyAgent)).not.toHaveBeenCalled();
   });
 
