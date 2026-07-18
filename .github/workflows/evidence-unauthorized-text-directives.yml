@@ -91,6 +91,7 @@ jobs:
           git reset --hard "${BASE_SHA}"
           git checkout --detach "${FIX_SHA}"
           test "$(git rev-parse HEAD)" = "${FIX_SHA}"
+          git update-ref refs/remotes/origin/main "${BASE_SHA}"
 
           node scripts/run-vitest.mjs \
             src/auto-reply/reply/get-reply-directives.target-session.test.ts \
