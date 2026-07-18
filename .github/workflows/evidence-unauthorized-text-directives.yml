@@ -20,8 +20,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      BASE_SHA: 1aa0d73823a0968510186b102da77fad86610793
-      FIX_SHA: dc0161c1692f5e7d6515ccdab4cb36fd72a38272
+      BASE_SHA: 3659c85e534fdb8b8ce6b7505a83d92cc2e4df8e
+      FIX_SHA: 1404cf34b90809340399c8e4c717938d69751c2e
       FIX_BRANCH: fix/preserve-unauthorized-text-directives
 
     steps:
