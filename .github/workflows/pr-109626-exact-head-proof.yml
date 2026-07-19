@@ -1,0 +1,148 @@
+name: PR 109626 exact-head behavior proof
+
+run-name: PR 109626 exact-head proof c109c25591eb
+
+on:
+  push:
+    branches:
+      - evidence/109276-thinking-default
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_BASE_SHA: 431482ca3ecf66fd857ba4107eb712acb9873c89
+  EXPECTED_HEAD_SHA: c109c25591ebd1377d32b9c96f7aacd8867c6c07
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  NODE_VERSION: "24.x"
+
+jobs:
+  precedence-proof:
+    name: Exact-head precedence transcript
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout evidence branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify exact head and base provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$EXPECTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "EXPECTED_HEAD_SHA must be a lowercase 40-character commit SHA" >&2
+            exit 2
+          fi
+          if [[ ! "$EXPECTED_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "EXPECTED_BASE_SHA must be a lowercase 40-character commit SHA" >&2
+            exit 2
+          fi
+
+          actual_head="$(git rev-parse HEAD^)"
+          actual_base="$(git rev-parse HEAD^^)"
+          test "$actual_head" = "$EXPECTED_HEAD_SHA"
+          test "$actual_base" = "$EXPECTED_BASE_SHA"
+
+          {
+            echo "PR head: $actual_head"
+            echo "Official base: $actual_base"
+            echo "Evidence commit: $(git rev-parse HEAD)"
+          } | tee exact-head-provenance.txt
+
+      - name: Setup Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          install-bun: "false"
+
+      - name: Capture official-base reproduction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree add ../official-base "$EXPECTED_BASE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" ../official-base/node_modules
+          (
+            cd ../official-base
+            node --import tsx --input-type=module <<'NODE'
+          import { resolveAgentConfig } from "./src/agents/agent-scope-config.ts";
+
+          const config = {
+            agents: {
+              defaults: { thinkingDefault: "high" },
+              list: [{ id: "listed" }],
+            },
+          };
+          const observed = resolveAgentConfig(config, "listed")?.thinkingDefault;
+          console.log(`official base merged thinkingDefault: ${String(observed)}`);
+          if (observed !== undefined) {
+            throw new Error(`expected undefined on official base, got ${String(observed)}`);
+          }
+          NODE
+          ) 2>&1 | tee official-base-reproduction.txt
+
+      - name: Capture merged inheritance and explicit-off transcript
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/run-vitest.mjs run src/agents/agent-scope.test.ts \
+            --reporter=verbose \
+            -t 'inherits the global thinking default for a listed agent|preserves an explicit per-agent off thinking default' \
+            2>&1 | tee agent-scope-precedence.txt
+
+      - name: Capture per-model-over-global transcript
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/run-vitest.mjs run src/auto-reply/reply/model-selection.test.ts \
+            --reporter=verbose \
+            -t 'prefers per-model params.thinking=.* over global thinkingDefault' \
+            2>&1 | tee model-selection-precedence.txt
+
+      - name: Capture Telegram menu precedence transcript
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/run-vitest.mjs run \
+            extensions/telegram/src/bot-native-commands.session-meta.test.ts \
+            --reporter=verbose \
+            -t 'uses target model thinking defaults before global thinking defaults|uses per-agent thinking defaults before target model and global thinking defaults' \
+            2>&1 | tee telegram-menu-precedence.txt
+
+      - name: Capture focused regression transcript
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/run-vitest.mjs run \
+            src/agents/subagent-spawn.test.ts \
+            src/gateway/session-utils.test.ts \
+            src/gateway/server-startup-log.test.ts \
+            --reporter=verbose \
+            -t 'thinkingDefault|thinking default' \
+            2>&1 | tee focused-runtime-regressions.txt
+
+      - name: Record patch integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check HEAD^^..HEAD^
+          git diff --stat HEAD^^..HEAD^ | tee patch-integrity.txt
+
+      - name: Publish inspectable transcript artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pr-109626-exact-head-transcript-c109c25591eb
+          path: |
+            exact-head-provenance.txt
+            official-base-reproduction.txt
+            agent-scope-precedence.txt
+            model-selection-precedence.txt
+            telegram-menu-precedence.txt
+            focused-runtime-regressions.txt
+            patch-integrity.txt
+          if-no-files-found: error
+          retention-days: 30
