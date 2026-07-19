@@ -1,0 +1,98 @@
+name: PR 111368 current-head lock proof
+
+on:
+  push:
+    branches:
+      - evidence/pr-111368-current-head
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  current-head-lock-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      PROOF_CODE_HEAD: 881177599ac90c9dfe263de4cf919094e0e476a7
+      PROOF_UPSTREAM_BASE: 356bec6f5d6324e09c00eaa64c9d42689ce5fc8d
+    steps:
+      - name: Check out evidence harness
+        uses: actions/checkout@v4
+        with:
+          path: evidence
+
+      - name: Check out exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PROOF_CODE_HEAD }}
+          path: source
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.2.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: source/pnpm-lock.yaml
+
+      - name: Verify exact source provenance
+        working-directory: source
+        run: |
+          test "$(git rev-parse HEAD)" = "$PROOF_CODE_HEAD"
+          test "$(git merge-base HEAD "$PROOF_UPSTREAM_BASE")" = "$PROOF_UPSTREAM_BASE"
+          git diff --check "$PROOF_UPSTREAM_BASE"...HEAD
+          test "$(git diff --name-only "$PROOF_UPSTREAM_BASE"...HEAD | sort | tr '\n' ' ')" = \
+            "src/infra/exec-approvals-sync-lock.test.ts src/infra/exec-approvals.ts "
+
+      - name: Install locked dependencies
+        working-directory: source
+        run: pnpm install --frozen-lockfile
+
+      - name: Run focused lock regression tests
+        working-directory: source
+        run: >-
+          pnpm exec vitest run
+          src/infra/exec-approvals-sync-lock.test.ts
+          src/infra/exec-approvals-store.test.ts
+
+      - name: Run lint and type gates
+        working-directory: source
+        run: |
+          pnpm exec oxlint --type-aware --type-check src/infra/exec-approvals.ts src/infra/exec-approvals-sync-lock.test.ts
+          pnpm exec oxfmt --check src/infra/exec-approvals.ts src/infra/exec-approvals-sync-lock.test.ts
+          pnpm tsgo:test:root
+
+      - name: Exercise repeated sync and async lock lifecycles
+        working-directory: source
+        run: pnpm exec tsx ../evidence/proof/pr-111368-lock-stress.ts | tee ../pr-111368-lock-proof.json
+
+      - name: Publish proof summary
+        if: always()
+        run: |
+          {
+            echo '## PR #111368 current-head lock proof'
+            echo
+            echo "- Code head: \`$PROOF_CODE_HEAD\`"
+            echo "- Upstream base: \`$PROOF_UPSTREAM_BASE\`"
+            echo '- Focused tests cover sync/async ownership, release failures, replacement sidecars, partial payloads, and process-local reentrancy.'
+            echo '- The stress harness performs 500 synchronous saves, 500 asynchronous updates, and 500 reads while asserting no canonical or temporary lock sidecar remains.'
+            echo
+            echo '```json'
+            cat pr-111368-lock-proof.json 2>/dev/null || echo '{"result":"stress proof did not produce output"}'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized proof log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-111368-current-head-lock-proof
+          path: pr-111368-lock-proof.json
+          if-no-files-found: warn
+          retention-days: 30
