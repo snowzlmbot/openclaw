@@ -267,6 +267,37 @@ describe("model thinking levels", () => {
     expect(clampThinkingLevel(model, "max")).toBe("high");
   });
 
+  it("treats an explicit compat opt-out as a hard cap over thinkingLevelMap", () => {
+    const model = {
+      ...baseModel,
+      thinkingLevelMap: {
+        xhigh: "xhigh",
+      },
+      compat: {
+        supportsReasoningEffort: false,
+      },
+    } satisfies TestOpenAICompletionsModel;
+
+    expect(getSupportedThinkingLevels(model)).toEqual(["off", "minimal", "low", "medium", "high"]);
+    expect(clampThinkingLevel(model, "xhigh")).toBe("high");
+  });
+
+  it("requires thinkingLevelMap values to match an explicit provider effort list", () => {
+    const model = {
+      ...baseResponsesModel,
+      thinkingLevelMap: {
+        xhigh: "provider-xhigh",
+      },
+      compat: {
+        supportsReasoningEffort: true,
+        supportedReasoningEfforts: ["low", "medium", "high"],
+      },
+    } satisfies TestOpenAIResponsesModel;
+
+    expect(getSupportedThinkingLevels(model)).toEqual(["off", "minimal", "low", "medium", "high"]);
+    expect(clampThinkingLevel(model, "xhigh")).toBe("high");
+  });
+
   it("keeps xhigh hidden for reasoning models without explicit extended support", () => {
     expect(getSupportedThinkingLevels(baseModel)).toEqual([
       "off",
