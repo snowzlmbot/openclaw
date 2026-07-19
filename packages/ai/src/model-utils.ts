@@ -81,11 +81,7 @@ function mappedReasoningEffortIsSupported(mapped: unknown, supportedEfforts: Set
   if (!normalized) {
     return false;
   }
-  return (
-    supportedEfforts.size === 0 ||
-    supportedEfforts.has(normalized) ||
-    (normalized === "max" && supportedEfforts.has("xhigh"))
-  );
+  return supportedEfforts.size === 0 || supportedEfforts.has(normalized);
 }
 
 function compatExplicitlySupportsExtendedThinkingLevel(
@@ -155,7 +151,14 @@ export function getSupportedThinkingLevels<TApi extends Api>(
       return false;
     }
     if (level === "xhigh" || level === "max") {
-      return mapped !== undefined || compatSupportsThinkingLevel(model, level);
+      const compat = getCompatReasoningEffortConfig(model);
+      if (compat?.supportsReasoningEffort === false) {
+        return false;
+      }
+      if (mapped !== undefined) {
+        return mappedReasoningEffortIsSupported(mapped, getCompatSupportedReasoningEfforts(compat));
+      }
+      return compatSupportsThinkingLevel(model, level);
     }
     return true;
   });
