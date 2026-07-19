@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      PROOF_CODE_HEAD: 052bfd3cf77c5b1ad106c2f2e715f29f33e34322
-      PROOF_UPSTREAM_BASE: 4e008cd713d76e6c35ec1f46216f4bf0eb8aa1fd
+      PROOF_CODE_HEAD: 4c6c20ad5ac3b992fe94a6ed216abd86627a5cf0
+      PROOF_UPSTREAM_BASE: d0f37bd8433782147629bdd2fc1b076c1def61d3
     steps:
       - name: Check out evidence harness
         uses: actions/checkout@v4
