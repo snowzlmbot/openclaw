@@ -1,0 +1,88 @@
+name: PR 111367 current-head request proof
+
+on:
+  push:
+    branches:
+      - evidence/pr-111367-current-head
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  current-head-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PROOF_CODE_HEAD: 9fcbdb03321467b40e82b895969e38a5f6b69115
+      PROOF_UPSTREAM_BASE: c95a8e3df1e6e8d1ea4925b615707bc97f6f52b5
+    steps:
+      - name: Check out evidence harness
+        uses: actions/checkout@v4
+        with:
+          path: evidence
+
+      - name: Check out exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PROOF_CODE_HEAD }}
+          path: source
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: source/pnpm-lock.yaml
+
+      - name: Verify exact source provenance
+        working-directory: source
+        run: |
+          test "$(git rev-parse HEAD)" = "$PROOF_CODE_HEAD"
+          test "$(git merge-base HEAD "$PROOF_UPSTREAM_BASE")" = "$PROOF_UPSTREAM_BASE"
+          git diff --check "$PROOF_UPSTREAM_BASE"...HEAD
+
+      - name: Install locked dependencies
+        working-directory: source
+        run: pnpm install --frozen-lockfile
+
+      - name: Run focused regression tests
+        working-directory: source
+        run: >-
+          pnpm exec vitest run
+          src/llm/model-utils.test.ts
+          src/agents/sessions/model-registry.test.ts
+          packages/ai/src/providers/openai-completions.test.ts
+          packages/ai/src/providers/openai-responses-shared.test.ts
+
+      - name: Capture actual outbound request bodies
+        working-directory: source
+        run: pnpm exec tsx ../evidence/proof/pr-111367/runtime-request-proof.ts | tee ../request-proof.log
+
+      - name: Publish proof summary
+        if: always()
+        run: |
+          {
+            echo '## PR #111367 current-head proof'
+            echo
+            echo "- Code head: \`$PROOF_CODE_HEAD\`"
+            echo "- Upstream base: \`$PROOF_UPSTREAM_BASE\`"
+            echo '- Focused tests exercise capability discovery, registry persistence, and both OpenAI transports.'
+            echo '- The runtime harness intercepts the actual OpenAI SDK HTTP request at the configured fetch boundary.'
+            echo
+            echo '```json'
+            cat request-proof.log 2>/dev/null || echo '{"result":"proof step did not produce output"}'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized proof log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-111367-current-head-request-proof
+          path: request-proof.log
+          if-no-files-found: warn
+          retention-days: 30
