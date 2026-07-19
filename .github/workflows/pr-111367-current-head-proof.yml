@@ -27,6 +27,7 @@ jobs:
         with:
           ref: ${{ env.PROOF_CODE_HEAD }}
           path: source
+          fetch-depth: 0
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
