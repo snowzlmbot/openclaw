@@ -1,0 +1,200 @@
+name: PR 111368 exec-approvals identity-drift proof
+
+on:
+  push:
+    branches:
+      - evidence/pr-111368-exec-approvals-lock
+  workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Exact OpenClaw main commit used for the before-fix lane.
+        required: true
+        type: string
+      head_sha:
+        description: Exact PR head commit used for the after-fix lane.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  identity-drift-proof:
+    name: ${{ matrix.lane }} - real FUSE consumer proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: before
+            repository: openclaw/openclaw
+            target_sha: ${{ github.event_name == 'workflow_dispatch' && inputs.base_sha || 'd2200f64af53eb24f4ddd51ab1bcba18745fc434' }}
+            expect_fixed: "false"
+          - lane: after
+            repository: snowzlmbot/OpenClaw
+            target_sha: ${{ github.event_name == 'workflow_dispatch' && inputs.head_sha || 'd09bb7f5ff8e30b3b662d4a69bd83219242caef7' }}
+            expect_fixed: "true"
+
+    steps:
+      - name: Checkout exact target
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: ${{ matrix.repository }}
+          ref: ${{ matrix.target_sha }}
+          fetch-depth: 1
+
+      - name: Verify immutable target
+        shell: bash
+        env:
+          TARGET_SHA: ${{ matrix.target_sha }}
+          PROOF_LANE: ${{ matrix.lane }}
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          printf 'proof.lane=%s\n' "$PROOF_LANE"
+          printf 'proof.target_sha=%s\n' "$TARGET_SHA"
+          printf 'proof.environment=GitHub-hosted ubuntu-24.04\n'
+
+      - name: Setup Node and dependencies
+        uses: ./.github/actions/setup-node-env
+        with:
+          node-version: "24.x"
+          install-deps: "true"
+          install-bun: "false"
+          use-actions-cache: "true"
+
+      - name: Mount real FUSE filesystem
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fuse-overlayfs
+          proof_root="$RUNNER_TEMP/pr-111368-fuse-${{ matrix.lane }}"
+          lower="$proof_root/lower"
+          upper="$proof_root/upper"
+          work="$proof_root/work"
+          merged="$proof_root/merged"
+          mkdir -p "$lower" "$upper" "$work" "$merged"
+          fuse-overlayfs -o "lowerdir=$lower,upperdir=$upper,workdir=$work" "$merged"
+          mountpoint -q "$merged"
+          filesystem="$(stat -f -c %T "$merged")"
+          printf 'PROOF_MOUNT=%s\n' "$merged" >> "$GITHUB_ENV"
+          printf 'PROOF_FILESYSTEM=%s\n' "$filesystem" >> "$GITHUB_ENV"
+          printf 'proof.filesystem=%s\n' "$filesystem"
+
+      - name: Run before/after OpenClaw consumer proof
+        shell: bash
+        env:
+          EXPECT_FIXED: ${{ matrix.expect_fixed }}
+          PROOF_LANE: ${{ matrix.lane }}
+          TARGET_SHA: ${{ matrix.target_sha }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/pr-111368-proof.mts" <<'EOF'
+          import fs from "node:fs";
+          import path from "node:path";
+
+          const lane = process.env.PROOF_LANE ?? "unknown";
+          const targetSha = process.env.TARGET_SHA ?? "unknown";
+          const expectFixed = process.env.EXPECT_FIXED === "true";
+          const stateDir = path.join(process.env.PROOF_MOUNT ?? "", "state");
+          fs.mkdirSync(stateDir, { recursive: true });
+          process.env.OPENCLAW_STATE_DIR = stateDir;
+          const lockPath = path.join(stateDir, "exec-approvals.json.lock");
+
+          const {
+            ensureExecApprovals,
+            loadExecApprovals,
+            updateExecApprovals,
+          } = await import(`${process.cwd()}/src/infra/exec-approvals.ts`);
+          const { withExecApprovalsLockSync } = await import(
+            `${process.cwd()}/src/infra/exec-approvals-lock.ts`
+          );
+
+          function rematerializeHeldSidecar(label: string): void {
+            const before = fs.lstatSync(lockPath, { bigint: true });
+            const replacementPath = `${lockPath}.${label}.replacement`;
+            fs.copyFileSync(lockPath, replacementPath, fs.constants.COPYFILE_EXCL);
+            fs.renameSync(replacementPath, lockPath);
+            const after = fs.lstatSync(lockPath, { bigint: true });
+            const identityChanged = before.dev !== after.dev || before.ino !== after.ino;
+            console.log(`proof.${label}.identity_changed=${identityChanged}`);
+            if (!identityChanged) {
+              throw new Error(`${label} proof did not rematerialize the lock identity`);
+            }
+          }
+
+          function expectEqual<T>(label: string, actual: T, expected: T): void {
+            console.log(`proof.${label}=${String(actual)}`);
+            if (actual !== expected) {
+              throw new Error(`${label} expected ${String(expected)} but received ${String(actual)}`);
+            }
+          }
+
+          ensureExecApprovals();
+          await updateExecApprovals({
+            update: (file) => {
+              rematerializeHeldSidecar("async");
+              return {
+                ...file,
+                defaults: { ...file.defaults, security: "allowlist", ask: "off" },
+              };
+            },
+          });
+
+          const asyncLockPresent = fs.existsSync(lockPath);
+          const asyncReadSecurity = loadExecApprovals().defaults?.security ?? "missing";
+          const asyncReadLockPresent = fs.existsSync(lockPath);
+          expectEqual("async.lock_present_after_update", asyncLockPresent, !expectFixed);
+          expectEqual(
+            "async.subsequent_read_security",
+            asyncReadSecurity,
+            expectFixed ? "allowlist" : "deny",
+          );
+          expectEqual("async.lock_present_after_read", asyncReadLockPresent, !expectFixed);
+          fs.rmSync(lockPath, { force: true });
+
+          withExecApprovalsLockSync(() => rematerializeHeldSidecar("sync"));
+          const syncLockPresent = fs.existsSync(lockPath);
+          const syncReadSecurity = loadExecApprovals().defaults?.security ?? "missing";
+          const syncReadLockPresent = fs.existsSync(lockPath);
+          expectEqual("sync.lock_present_after_release", syncLockPresent, !expectFixed);
+          expectEqual(
+            "sync.subsequent_read_security",
+            syncReadSecurity,
+            expectFixed ? "allowlist" : "deny",
+          );
+          expectEqual("sync.lock_present_after_read", syncReadLockPresent, !expectFixed);
+          fs.rmSync(lockPath, { force: true });
+
+          console.log(`proof.lane=${lane}`);
+          console.log(`proof.target_sha=${targetSha}`);
+          console.log(`proof.filesystem=${process.env.PROOF_FILESYSTEM ?? "unknown"}`);
+          console.log("proof.result=passed");
+          EOF
+          node --import tsx "$RUNNER_TEMP/pr-111368-proof.mts" | tee "$RUNNER_TEMP/proof-${{ matrix.lane }}.log"
+
+      - name: Run focused regression suite
+        if: matrix.lane == 'after'
+        shell: bash
+        run: node scripts/run-vitest.mjs src/infra/exec-approvals-store.test.ts
+
+      - name: Upload sanitized proof log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pr-111368-${{ matrix.lane }}-fuse-proof-${{ matrix.target_sha }}
+          path: ${{ runner.temp }}/proof-${{ matrix.lane }}.log
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Unmount proof filesystem
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -n "${PROOF_MOUNT:-}" ]] && mountpoint -q "$PROOF_MOUNT"; then
+            fusermount3 -u "$PROOF_MOUNT" || sudo umount "$PROOF_MOUNT"
+          fi
