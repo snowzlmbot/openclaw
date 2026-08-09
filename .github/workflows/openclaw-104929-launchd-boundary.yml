@@ -1,0 +1,115 @@
+name: OpenClaw 104929 launchd boundary proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/openclaw-104929-launchd-boundary.yml"
+      - "scripts/proof/openclaw-104929-launchd-boundary.py"
+
+permissions:
+  contents: read
+
+jobs:
+  launchd-boundary:
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove launchd cannot contain new-session and double-fork descendants
+        run: |
+          set -o pipefail
+          mkdir -p proof-artifacts/openclaw-104929-launchd-boundary
+          python3 scripts/proof/openclaw-104929-launchd-boundary.py \
+            | tee proof-artifacts/openclaw-104929-launchd-boundary/result.json
+
+      - name: Upload process-table evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openclaw-104929-launchd-boundary
+          path: proof-artifacts/openclaw-104929-launchd-boundary
+          if-no-files-found: error
+
+  candidate-lease-reap:
+    runs-on: macos-14
+    timeout-minutes: 30
+    env:
+      CANDIDATE_SHA: "be52e466068dd57e0f1f8c24d4ab8dd5612e5405"
+    steps:
+      - name: Checkout evidence harness
+        uses: actions/checkout@v4
+        with:
+          path: evidence
+
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          repository: snowzlmbot/openclaw
+          ref: ${{ env.CANDIDATE_SHA }}
+          path: candidate
+
+      - name: Verify candidate identity
+        working-directory: candidate
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable pnpm
+        working-directory: candidate
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.2.2 --activate
+
+      - name: Install exact candidate dependencies
+        working-directory: candidate
+        run: pnpm install --frozen-lockfile --config.engine-strict=false
+
+      - name: Run detached lease cleanup proof
+        working-directory: candidate
+        run: |
+          set -o pipefail
+          mkdir -p ../proof-artifacts/openclaw-104929-candidate
+          node scripts/run-vitest.mjs run \
+            --config test/vitest/vitest.extension-acpx.config.ts \
+            extensions/acpx/src/process-reaper.real.test.ts \
+            extensions/acpx/src/process-reaper.test.ts \
+            extensions/acpx/src/runtime.test.ts \
+            extensions/acpx/src/service.test.ts \
+            | tee ../proof-artifacts/openclaw-104929-candidate/acpx.log
+
+      - name: Run cancel and operator-feedback proof
+        working-directory: candidate
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run \
+            --config test/vitest/vitest.unit.config.ts \
+            src/acp/control-plane/manager.cancel-session.test.ts \
+            | tee ../proof-artifacts/openclaw-104929-candidate/control-plane.log
+          node scripts/run-vitest.mjs run \
+            --config test/vitest/vitest.auto-reply-reply.config.ts \
+            src/auto-reply/reply/abort.test.ts \
+            | tee ../proof-artifacts/openclaw-104929-candidate/abort-feedback.log
+
+      - name: Run service-managed ownership proof
+        working-directory: candidate
+        run: |
+          set -o pipefail
+          mkdir -p scripts/proof
+          cp ../evidence/scripts/proof/openclaw-104929-service-worker.mts scripts/proof/
+          python3 ../evidence/scripts/proof/openclaw-104929-service-proof.py \
+            . \
+            ../proof-artifacts/openclaw-104929-candidate \
+            "$(command -v node)" \
+            | tee ../proof-artifacts/openclaw-104929-candidate/service-proof.log
+
+      - name: Upload candidate proof logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openclaw-104929-candidate-proof
+          path: proof-artifacts/openclaw-104929-candidate
+          if-no-files-found: error

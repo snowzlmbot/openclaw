@@ -1,4 +1,5 @@
 // Vitest Process Group tests cover vitest process group script behavior.
+import { execFileSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import {
   forwardSignalToVitestProcessGroup,
@@ -29,6 +30,27 @@ describe("vitest process group helpers", () => {
     expect(shouldUseDetachedVitestProcessGroup("linux")).toBe(true);
     expect(shouldUseDetachedVitestProcessGroup("win32")).toBe(false);
   });
+
+  it.skipIf(process.platform !== "darwin")(
+    "evidence: launchd bootout cannot contain setsid and double-fork descendants",
+    () => {
+      const output = execFileSync(
+        "python3",
+        ["scripts/proof/openclaw-104929-launchd-boundary.py"],
+        { encoding: "utf8" },
+      );
+      const evidence = JSON.parse(output) as {
+        expected_boundary: Record<string, boolean>;
+      };
+      expect(evidence.expected_boundary).toEqual({
+        leader_reaped: true,
+        plain_reaped: true,
+        setsid_survived: true,
+        double_fork_survived: true,
+      });
+    },
+    30_000,
+  );
 
   it("targets the process group on Unix and the direct pid on Windows", () => {
     expect(resolveVitestProcessGroupSignalTarget({ childPid: 4200, platform: "darwin" })).toBe(
